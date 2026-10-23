@@ -7,7 +7,7 @@ instantly at a price you set: it powers the backtester and the tests.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Protocol
 
 import httpx
@@ -94,6 +94,11 @@ class AlpacaBroker:
         ]
 
     def bars(self, symbol: str, limit: int = 60) -> list[Bar]:
+        """The most recent `limit` daily bars, oldest first.
+
+        Alpaca applies `limit` from `start`, so asking for ascending bars from a fixed date returns the *oldest* ones. We ask for
+        descending order from a start far enough back to hold `limit` trading days, then reverse."""
+        start = datetime.now(UTC) - timedelta(days=int(limit * 1.6) + 10)
         body = self.get(
             self.data,
             f"/v2/stocks/{symbol}/bars",
@@ -101,10 +106,10 @@ class AlpacaBroker:
             limit=limit,
             adjustment="all",
             feed=self.feed,
-            sort="asc",
-            start=(datetime.now(UTC).replace(year=datetime.now(UTC).year - 2)).strftime("%Y-%m-%d"),
+            sort="desc",
+            start=start.strftime("%Y-%m-%d"),
         )
-        rows = (body.get("bars") or [])[-limit:]
+        rows = list(reversed(body.get("bars") or []))
         return [
             Bar(parse_time(b["t"]), b["o"], b["h"], b["l"], b["c"], b.get("v", 0)) for b in rows
         ]

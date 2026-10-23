@@ -143,3 +143,17 @@ def test_from_env_prefers_resend_when_its_key_and_recipient_are_set(monkeypatch)
     monkeypatch.setenv("NOTIFY_EMAIL_TO", "me@example.com")
     notifier = from_env()
     assert type(notifier).__name__ == "Fanout" and type(notifier.channels[0]).__name__ == "Resend"
+
+
+def test_resend_errors_carry_the_reason_it_gave():
+    import pytest
+
+    from loamz.solutions.kit.notify import Resend
+
+    refuse = httpx.MockTransport(
+        lambda r: httpx.Response(
+            403, json={"message": "You can only send testing emails to your own email address"}
+        )
+    )
+    with pytest.raises(RuntimeError, match="only send testing emails to your own"):
+        Resend("k", "x@example.com", transport=refuse).send(Alert("k", "t"))

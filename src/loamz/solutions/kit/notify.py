@@ -120,7 +120,12 @@ class Resend:
                 "text": alert.body or alert.title,
             },
         )
-        response.raise_for_status()
+        if response.status_code >= 400:
+            try:
+                reason = response.json().get("message", response.text)
+            except ValueError:
+                reason = response.text
+            raise RuntimeError(f"Resend refused the email ({response.status_code}): {reason}")
 
 
 class Fanout:

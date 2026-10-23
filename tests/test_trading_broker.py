@@ -153,3 +153,28 @@ def test_the_endpoint_as_the_alpaca_dashboard_shows_it_is_still_paper():
     assert AlpacaBroker("i", "s", base_url="https://paper-api.alpaca.markets/v2/").mode == "paper"
     with pytest.raises(BrokerError):
         AlpacaBroker("i", "s", base_url="https://api.alpaca.markets/v2")
+
+
+def test_bars_are_the_most_recent_ones_oldest_first():
+    seen = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        seen.append(dict(request.url.params))
+        newest_first = [
+            {"t": f"2026-10-{day:02d}T04:00:00Z", "o": day, "h": day, "l": day, "c": day, "v": 1}
+            for day in (23, 22, 21)
+        ]
+        return httpx.Response(200, json={"bars": newest_first})
+
+    bars = alpaca(handle).bars("AAPL", 3)
+    assert [b.close for b in bars] == [21, 22, 23]  # oldest first, ending at the newest
+    params = seen[0]
+    assert (
+        params["sort"] == "desc" and params["limit"] == "3"
+    )  # the newest three, not the oldest three in the window
+    from datetime import UTC, datetime
+
+    start = datetime.fromisoformat(params["start"]).replace(tzinfo=UTC)
+    assert (
+        0 < (datetime.now(UTC) - start).days < 30
+    )  # a window sized to the request, not a fixed two years
