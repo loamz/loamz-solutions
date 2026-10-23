@@ -12,10 +12,13 @@
     loamz-solutions trade status | run-once | watch --every 300 | report | explain AAPL | verify
     loamz-solutions trade kill | resume          # the kill switch
 
+    loamz-solutions data demo                    # map + ideas on sample files and the synthetic inbox
+    loamz-solutions data scan | map | search "northwind" | ask "what is the indemnity cap?" | suggest
+
     loamz-solutions serve [--demo]               # offer the above to agents on a Loamz deployment (MCP over SSE)
 
 Settings come from the environment (a `.env` file is read): MAIL_IMAP_HOST, MAIL_USER, MAIL_PASSWORD, MAIL_FOLDER,
-MAIL_VIPS (comma separated addresses or @domains), MAIL_ABOUT (a sentence about you), STATE_DIR (default .state), TRADE_*\n(see .env.example), ALPACA_KEY_ID / ALPACA_SECRET_KEY, SIGNAL_URL / SIGNAL_TOKEN (your own model), and for the
+DATA_FOLDERS (comma separated), LOAMZ_ENDPOINT, MAIL_VIPS (comma separated addresses or @domains), MAIL_ABOUT (a sentence about you), STATE_DIR (default .state), TRADE_*\n(see .env.example), ALPACA_KEY_ID / ALPACA_SECRET_KEY, SIGNAL_URL / SIGNAL_TOKEN (your own model), and for the
 model LLM_API_KEY / LLM_BASE_URL / LLM_MODEL. Without a model, rules alone rank your mail.
 """
 
@@ -128,6 +131,67 @@ def mail(args: argparse.Namespace) -> None:
             print(f"{time.strftime('%H:%M')} fetched {report.fetched}, new {report.new}")
 
 
+def build_data(demo: bool = False):
+    import tempfile
+
+    from loamz.solutions.concierge import DataConcierge, DataIndex, FolderConnector, LoamzSource
+
+    state = Path(tempfile.mkdtemp(prefix="loamz-demo-state-")) if demo else state_dir() / "data"
+    state.mkdir(parents=True, exist_ok=True)
+    mail = None
+    if demo:
+        from loamz.solutions.concierge.demo import make_demo_folder
+
+        roots = [make_demo_folder(Path(tempfile.mkdtemp(prefix="loamz-demo-")) / "files")]
+        mail = build_mail(demo=True)
+        mail.sync()
+    else:
+        roots = [r.strip() for r in os.environ.get("DATA_FOLDERS", "").split(",") if r.strip()]
+        if os.environ.get("MAIL_USER") and os.environ.get("MAIL_PASSWORD"):
+            mail = build_mail()
+    loamz = None
+    if os.environ.get("LOAMZ_ENDPOINT"):
+        from loamz.data import DataClient
+        from loamz.identity import DefaultLoamzCredential
+
+        loamz = LoamzSource(
+            DataClient(os.environ["LOAMZ_ENDPOINT"], DefaultLoamzCredential()),
+            os.environ.get("LOAMZ_USER_ID", ""),
+        )
+    folders = FolderConnector(roots) if roots else None
+    return DataConcierge(
+        DataIndex(state / "index.sqlite"), folders, mail=mail, loamz=loamz, llm=model()
+    )
+
+
+def data(args: argparse.Namespace) -> None:
+    concierge = build_data(demo=args.command == "demo" or args.demo)
+    if args.command in ("demo", "scan", "map"):
+        report = concierge.scan()
+        if args.command == "scan":
+            print(
+                f"saw {report.files_seen} readable files, {report.files_new} new or changed; unreadable: {report.unreadable or 'none'}"
+            )
+        else:
+            print(concierge.inventory())
+    if args.command == "demo":
+        print("Ask it something: " + 'loamz-solutions data --demo ask "what is the indemnity cap?"')
+        print("\nIdeas:\n" + concierge.suggest())
+    if args.command == "search":
+        concierge.scan()
+        for h in concierge.search(args.query):
+            print(f"[{h['where']}] {h['title']}  {h['ref']}\n    {h['snippet']}")
+    if args.command == "ask":
+        concierge.scan()
+        answer = concierge.ask(args.question)
+        print(answer.text)
+        for h in answer.sources[:5]:
+            print(f"  [{h['ref']}] ({h['where']}) {h['title']}")
+    if args.command == "suggest":
+        concierge.scan()
+        print(concierge.suggest())
+
+
 def serve_tools(args: argparse.Namespace) -> None:
     from loamz.solutions import server
 
@@ -187,6 +251,21 @@ def main(argv: list[str] | None = None) -> None:
     from loamz.solutions.trading import cli as trading
 
     trading.add_parser(solutions)
+    data_parser = solutions.add_parser(
+        "data", help="the Data Concierge: where your data lives, and questions across it"
+    )
+    data_parser.add_argument(
+        "--demo", action="store_true", help="use sample files and the synthetic inbox"
+    )
+    data_commands = data_parser.add_subparsers(dest="command", required=True)
+    data_commands.add_parser("demo", help="map and suggestions on sample data")
+    data_commands.add_parser("scan", help="index the configured folders")
+    data_commands.add_parser("map", help="where your data lives")
+    d_search = data_commands.add_parser("search", help="find things across files, mail and Loamz")
+    d_search.add_argument("query")
+    d_ask = data_commands.add_parser("ask", help="ask a question across everything")
+    d_ask.add_argument("question")
+    data_commands.add_parser("suggest", help="useful things to do with what you have")
     serve = solutions.add_parser(
         "serve", help="serve the solutions as tools for agents (MCP over SSE)"
     )
@@ -204,6 +283,8 @@ def main(argv: list[str] | None = None) -> None:
     args = parser.parse_args(argv)
     if args.solution == "serve":
         serve_tools(args)
+    elif args.solution == "data":
+        data(args)
     elif args.solution == "mail":
         mail(args)
     elif args.solution == "trade":

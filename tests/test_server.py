@@ -13,6 +13,8 @@ import uvicorn
 from mcp import ClientSession
 from mcp.client.sse import sse_client
 
+from loamz.solutions.concierge import DataConcierge, DataIndex, FolderConnector
+from loamz.solutions.concierge.demo import make_demo_folder
 from loamz.solutions.kit.ledger import Ledger
 from loamz.solutions.mail import MailStore
 from loamz.solutions.mail.concierge import MailConcierge
@@ -39,7 +41,14 @@ def running(tmp_path):
         Triager(RuleClassifier(PROFILE)),
         Ledger(tmp_path / "ml.sqlite"),
     )
-    service = Solutions(mail, trader, ledger, llm=None, kill_file=str(tmp_path / "trader" / "KILL"))
+    data = DataConcierge(
+        DataIndex(tmp_path / "d.sqlite"),
+        FolderConnector([make_demo_folder(tmp_path / "files")]),
+        mail=mail,
+    )
+    service = Solutions(
+        mail, trader, ledger, llm=None, kill_file=str(tmp_path / "trader" / "KILL"), data=data
+    )
     port = free_port()
     server = uvicorn.Server(
         uvicorn.Config(build_app(service, TOKEN), host="127.0.0.1", port=port, log_level="error")
@@ -85,6 +94,18 @@ async def test_a_wrong_token_is_refused(running):
         async with connect(url, token="nope"):
             pass
     assert httpx.get(url, headers={"Authorization": "Bearer nope"}).status_code == 401
+
+
+async def test_the_mail_tools_refresh_a_stale_index_by_themselves(running):
+    url, service = running
+    async with connect(url) as session:
+        assert "Needs you today" in await call(
+            session, "mail_digest"
+        )  # never synced: it syncs first
+    assert len(service.mail.ledger.entries(kind="mail.synced")) == 1
+    async with connect(url) as session:
+        await call(session, "mail_top")  # fresh now: no second sync
+    assert len(service.mail.ledger.entries(kind="mail.synced")) == 1
 
 
 async def test_mail_tools_sync_digest_search_and_rank(running):
@@ -164,3 +185,20 @@ def test_the_platform_config_vouches_only_for_read_only_tools():
     assert set(entry["safe_tools"]) == set(SAFE_TOOLS) and not set(entry["safe_tools"]) & set(
         NEEDS_APPROVAL
     )
+
+
+async def test_data_tools_map_search_ask_and_suggest(running):
+    url, _ = running
+    async with connect(url) as session:
+        mapped = await call(session, "data_inventory")
+        assert (
+            "## Files" in mapped and "9 readable files" in mapped and "Not readable yet" in mapped
+        )
+        found = await call(session, "data_search", query="indemnity cap")
+        assert "northwind-call.md" in found and "northwind-summary.txt" in found
+        answer = await call(session, "data_ask", question="what is the indemnity cap?")
+        assert (
+            "closest matches" in answer and "Sources:" in answer
+        )  # no model in this test: the matches are returned
+        assert "CSV files" in await call(session, "data_suggest")
+        assert "No matches." == await call(session, "data_search", query="zzzz-nothing")

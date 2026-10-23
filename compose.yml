@@ -1,0 +1,15 @@
+# Run the solutions next to a Loamz cell: `docker compose up -d`, then put the printed entry into the cell's TOOL_SERVERS.
+# Secrets come from .env (see .env.example); nothing is baked into the image.
+services:
+  solutions:
+    build: .
+    env_file: .env
+    environment:
+      SOLUTIONS_TOKEN: ${SOLUTIONS_TOKEN:?set SOLUTIONS_TOKEN (openssl rand -hex 24)}
+    ports: ["127.0.0.1:8765:8765"]
+    volumes:
+      - solutions-state:/state
+      - ${DATA_FOLDERS_HOST:-./data}:/data:ro
+    restart: unless-stopped
+volumes:
+  solutions-state:

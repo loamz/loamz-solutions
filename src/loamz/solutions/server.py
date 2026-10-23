@@ -37,6 +37,10 @@ SAFE_TOOLS = [
     "trade_explain",
     "trade_report",
     "trade_kill",
+    "data_inventory",
+    "data_search",
+    "data_ask",
+    "data_suggest",
 ]
 NEEDS_APPROVAL = ["trade_place_order", "trade_run_once", "trade_resume"]
 
@@ -58,14 +62,13 @@ class Solutions:
         ledger: Ledger | None,
         llm: LLM | None = None,
         kill_file: str = ".state/KILL",
+        mail_max_age_minutes: int = 10,
+        data=None,
     ) -> None:
-        self.mail, self.trader, self.ledger, self.llm, self.kill_file = (
-            mail,
-            trader,
-            ledger,
-            llm,
-            kill_file,
-        )
+        self.mail, self.trader, self.ledger, self.llm = mail, trader, ledger, llm
+        self.data = data
+        self.kill_file = kill_file
+        self.mail_max_age = timedelta(minutes=mail_max_age_minutes)
         self.lock = threading.Lock()
 
     def need_mail(self) -> MailConcierge:
@@ -83,6 +86,14 @@ class Solutions:
         return self.trader
 
     # ------------------------------------------------------------------ mail
+    def fresh_mail(self) -> MailConcierge:
+        """The Concierge, with its index refreshed if it is older than `mail_max_age`: an agent never has to know to sync."""
+        mail = self.need_mail()
+        last = mail.ledger.entries(kind="mail.synced", limit=1, newest_first=True)
+        if not last or mail.ledger.now() - last[0].at > self.mail_max_age:
+            mail.sync(days=2)
+        return mail
+
     def mail_sync(self, days: int = 2) -> str:
         with self.lock:
             r = self.need_mail().sync(days=max(1, min(days, 30)))
@@ -90,12 +101,12 @@ class Solutions:
 
     def mail_digest(self, hours: int = 24) -> str:
         with self.lock:
-            return self.need_mail().digest(hours=max(1, min(hours, 24 * 14)))
+            return self.fresh_mail().digest(hours=max(1, min(hours, 24 * 14)))
 
     def mail_top(self, limit: int = 10, at_least: str = "important") -> str:
         with self.lock:
             since = datetime.now(UTC) - timedelta(days=7)
-            rows = self.need_mail().store.top(
+            rows = self.fresh_mail().store.top(
                 since=since, at_least=Priority.parse(at_least), limit=max(1, min(limit, 50))
             )
         if not rows:
@@ -107,11 +118,48 @@ class Solutions:
 
     def mail_ask(self, question: str) -> str:
         with self.lock:
-            answer = self.need_mail().ask(question, self.llm)
+            answer = self.fresh_mail().ask(question, self.llm)
         sources = "\n".join(
             f"- [{h['id']}] {h['at'][:10]} {h['author']}: {h['title']}" for h in answer.sources[:5]
         )
         return answer.text + (f"\n\nSources:\n{sources}" if sources else "")
+
+    # ------------------------------------------------------------------ data
+    def need_data(self):
+        if self.data is None:
+            raise RuntimeError(
+                "The Data Concierge is not configured on this server (set DATA_FOLDERS, or run with --demo)"
+            )
+        return self.data
+
+    def data_inventory(self) -> str:
+        with self.lock:
+            concierge = self.need_data()
+            concierge.scan()
+            return concierge.inventory()
+
+    def data_search(self, query: str) -> str:
+        with self.lock:
+            concierge = self.need_data()
+            concierge.scan()
+            hits = concierge.search(query)
+        if not hits:
+            return "No matches."
+        return "\n".join(f"[{h['where']}] {h['title']} ({h['ref']}): {h['snippet']}" for h in hits)
+
+    def data_ask(self, question: str) -> str:
+        with self.lock:
+            concierge = self.need_data()
+            concierge.scan()
+            answer = concierge.ask(question)
+        sources = "\n".join(f"- [{h['ref']}] {h['title']}" for h in answer.sources[:5])
+        return answer.text + (f"\n\nSources:\n{sources}" if sources else "")
+
+    def data_suggest(self) -> str:
+        with self.lock:
+            concierge = self.need_data()
+            concierge.scan()
+            return concierge.suggest()
 
     # ------------------------------------------------------------------ trading
     def trade_status(self) -> str:
@@ -195,6 +243,10 @@ def build_app(service: Solutions, token: str):
         "trade_signals": "What the signal model thinks of one symbol right now. Does not trade.",
         "trade_explain": "Explain, from the ledger, what the trader saw, decided and did for one symbol.",
         "trade_report": "Profit and loss, win rate and drawdown from the ledger.",
+        "data_inventory": "A map of where the owner's data lives (files, mail, Loamz) and what can be done with each.",
+        "data_search": "Find things across the owner's files, mail and Loamz data by words.",
+        "data_ask": "Answer a question using the owner's files, mail and Loamz data, citing what was used.",
+        "data_suggest": "Useful things the owner could do with the data they have.",
         "trade_kill": "Stop all trading immediately (the kill switch). Always safe.",
         "trade_resume": "Turn the kill switch off so trading may continue.",
         "trade_run_once": "Run one trading pass over all symbols: the model decides and every risk limit applies.",
@@ -256,4 +308,8 @@ def from_env(demo: bool = False) -> Solutions:
                 approver=refuse,
             )
     kill = trader.config.risk.kill_file if trader else ".state/KILL"
-    return Solutions(mail, trader, ledger, optional_llm(), kill_file=kill)
+    concierge = None
+    if demo or os.environ.get("DATA_FOLDERS"):
+        concierge = cli.build_data(demo=demo)
+        concierge.llm = optional_llm()
+    return Solutions(mail, trader, ledger, optional_llm(), kill_file=kill, data=concierge)
