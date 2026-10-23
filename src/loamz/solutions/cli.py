@@ -211,7 +211,15 @@ def serve_tools(args: argparse.Namespace) -> None:
 
     service = server.from_env(demo=args.demo)
     where = (
-        ", ".join(n for n, on in (("mail", service.mail), ("trading", service.trader)) if on)
+        ", ".join(
+            n
+            for n, on in (
+                ("mail", service.mail),
+                ("trading", service.trader),
+                ("data", service.data),
+            )
+            if on
+        )
         or "nothing configured"
     )
     print(f"serving {where} on {args.host}:{args.port}/sse")
