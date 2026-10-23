@@ -1,0 +1,44 @@
+[project]
+name = "loamz-solutions"
+version = "0.1.0"
+description = "Solutions built on Loamz: mail triage, paper trading and a data concierge, on a small kit of connectors, guarded actions and ledgers."
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.12"
+dependencies = ["httpx>=0.28,<1", "loamz-core", "loamz-identity", "loamz-data"]
+
+[project.optional-dependencies]
+agents = ["loamz-agents"]
+
+[project.scripts]
+loamz-solutions = "loamz.solutions.cli:main"
+
+[dependency-groups]
+dev = ["ruff>=0.15", "pytest>=9", "pytest-asyncio>=1.4", "pytest-timeout>=2.3"]
+
+[build-system]
+requires = ["uv_build>=0.11.16,<0.12"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "loamz.solutions"
+
+[tool.uv.sources]
+loamz-core = { git = "https://github.com/loamz/loamz-python", subdirectory = "sdk/python/core" }
+loamz-identity = { git = "https://github.com/loamz/loamz-python", subdirectory = "sdk/python/identity" }
+loamz-data = { git = "https://github.com/loamz/loamz-python", subdirectory = "sdk/python/data" }
+loamz-agents = { git = "https://github.com/loamz/loamz-python", subdirectory = "sdk/python/agents" }
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I", "UP", "B"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["loamz"]
