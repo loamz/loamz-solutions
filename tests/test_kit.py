@@ -98,3 +98,15 @@ def test_a_failing_action_is_recorded_not_raised(tmp_path):
 
     outcome = guard.run(order(), boom)
     assert outcome.status == "failed" and kinds(ledger)[-1] == "action.failed"
+
+
+def test_approval_above_a_limit_only_asks_about_the_big_ones(tmp_path):
+    from loamz.solutions.kit import RequireApprovalAbove
+
+    rule = RequireApprovalAbove("amount", 1000, kinds=("pay",))
+    ledger = Ledger()
+    assert rule.check(Action("pay", "x", {"amount": 900}), ledger).decision.value == "allow"
+    assert (
+        rule.check(Action("pay", "x", {"amount": 1500}), ledger).decision.value == "needs_approval"
+    )
+    assert rule.check(Action("refund", "x", {"amount": 99999}), ledger).decision.value == "allow"

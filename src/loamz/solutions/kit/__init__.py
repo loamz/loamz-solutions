@@ -9,6 +9,7 @@ from loamz.solutions.kit.guard import (
     MaxPerAction,
     Outcome,
     RequireApproval,
+    RequireApprovalAbove,
     Verdict,
 )
 from loamz.solutions.kit.ledger import Entry, Ledger
@@ -27,5 +28,6 @@ __all__ = [
     "Outcome",
     "Record",
     "RequireApproval",
+    "RequireApprovalAbove",
     "Verdict",
 ]

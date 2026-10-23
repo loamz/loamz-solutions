@@ -161,3 +161,18 @@ class RequireApproval:
 
     def check(self, action: Action, ledger: Ledger) -> Verdict:
         return Verdict.approve(self.reason) if action.kind in self.kinds else Verdict.allow()
+
+
+class RequireApprovalAbove:
+    """A person must confirm actions of these kinds when a numeric parameter exceeds `limit` (smaller ones go straight through)."""
+
+    def __init__(self, param: str, limit: float, kinds: tuple[str, ...] | None = None) -> None:
+        self.param, self.limit, self.kinds = param, limit, kinds
+        self.name = f"approve-above-{param}"
+
+    def check(self, action: Action, ledger: Ledger) -> Verdict:
+        if self.kinds and action.kind not in self.kinds:
+            return Verdict.allow()
+        if float(action.params.get(self.param, 0) or 0) > self.limit:
+            return Verdict.approve(f"{self.param} is over {self.limit:,.0f}: a person must confirm")
+        return Verdict.allow()

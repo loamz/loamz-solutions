@@ -27,7 +27,7 @@ uv run loamz-solutions --help
 - `Notifier`: webhooks (Slack, Discord, ntfy, JSON), email, console; each event is announced once, even across restarts.
 - `LLM`: a tiny client for any OpenAI-compatible endpoint.
 
-A new solution is: connectors in, a decision (rules, a model), a guarded action out, a ledger line for each step, and a tool
+See [docs/build-your-own.md](docs/build-your-own.md) and the tested example `examples/invoice_approver.py`. A new solution is: connectors in, a decision (rules, a model), a guarded action out, a ledger line for each step, and a tool
 wrapper so agents can use it.
 
 Credentials live in a local `.env` (see `.env.example`), never in the repository. Real-money trading is refused by default.

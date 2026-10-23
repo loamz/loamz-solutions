@@ -9,7 +9,7 @@ uv run loamz-solutions serve --demo --port 8765        # a synthetic inbox and a
 uv run loamz-solutions serve --print-config --url http://host.docker.internal:8765/sse    # the entry for your deployment
 ```
 
-Real accounts: leave out `--demo` and set `MAIL_*` (see `.env.example`) and/or `ALPACA_*` + `TRADE_SYMBOLS`; each solution is
+Real accounts: leave out `--demo` and set `MAIL_*` (see `.env.example`), `ALPACA_*` + `TRADE_SYMBOLS` and/or `DATA_FOLDERS`; each solution is
 offered only when configured.
 
 ## Connect it to a deployment
@@ -23,7 +23,7 @@ needs in `allowed_tools`, for example:
 ## What runs freely and what asks first
 | Tools | Behaviour |
 | --- | --- |
-| `mail_sync`, `mail_digest`, `mail_top`, `mail_ask`, `trade_status`, `trade_signals`, `trade_explain`, `trade_report`, `trade_kill` | read-only (or a safe stop): the operator vouches for them in `safe_tools`; they run at once |
+| `mail_sync`, `mail_digest`, `mail_top`, `mail_ask`, `data_inventory`, `data_search`, `data_ask`, `data_suggest`, `trade_status`, `trade_signals`, `trade_explain`, `trade_report`, `trade_kill` | read-only (or a safe stop): the operator vouches for them in `safe_tools`; they run at once |
 | `trade_place_order`, `trade_run_once`, `trade_resume` | change something: **a person approves each call** in the console or through the approvals API, and the risk limits still apply after approval |
 
 Live trading cannot be reached through the tool server at all: it carries no human approver, and a live account's every order
