@@ -7,8 +7,13 @@
     loamz-solutions mail --demo ask "who is waiting on me?"      # ask the demo inbox
     loamz-solutions mail watch --every 600       # sync and refresh the digest on a loop
 
+    loamz-solutions trade demo                   # simulate on synthetic prices, no account needed
+    loamz-solutions trade backtest --symbols AAPL,MSFT
+    loamz-solutions trade status | run-once | watch --every 300 | report | explain AAPL | verify
+    loamz-solutions trade kill | resume          # the kill switch
+
 Settings come from the environment (a `.env` file is read): MAIL_IMAP_HOST, MAIL_USER, MAIL_PASSWORD, MAIL_FOLDER,
-MAIL_VIPS (comma separated addresses or @domains), MAIL_ABOUT (a sentence about you), STATE_DIR (default .state), and for the
+MAIL_VIPS (comma separated addresses or @domains), MAIL_ABOUT (a sentence about you), STATE_DIR (default .state), TRADE_*\n(see .env.example), ALPACA_KEY_ID / ALPACA_SECRET_KEY, SIGNAL_URL / SIGNAL_TOKEN (your own model), and for the
 model LLM_API_KEY / LLM_BASE_URL / LLM_MODEL. Without a model, rules alone rank your mail.
 """
 
@@ -148,9 +153,14 @@ def main(argv: list[str] | None = None) -> None:
     watch.add_argument("--every", type=int, default=600)
     watch.add_argument("--days", type=int, default=2)
     watch.add_argument("--hours", type=int, default=24)
+    from loamz.solutions.trading import cli as trading
+
+    trading.add_parser(solutions)
     args = parser.parse_args(argv)
     if args.solution == "mail":
         mail(args)
+    elif args.solution == "trade":
+        trading.run(args)
 
 
 if __name__ == "__main__":

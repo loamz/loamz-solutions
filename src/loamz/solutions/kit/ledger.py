@@ -15,7 +15,7 @@ import hashlib
 import json
 import sqlite3
 import threading
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -47,8 +47,11 @@ def digest(previous: str, at: str, kind: str, subject: str, payload: str) -> str
 
 
 class Ledger:
-    def __init__(self, path: str | Path = ":memory:") -> None:
+    def __init__(
+        self, path: str | Path = ":memory:", clock: Callable[[], datetime] | None = None
+    ) -> None:
         self.path = str(path)
+        self.clock = clock or (lambda: datetime.now(UTC))  # a backtest passes simulated time
         if self.path != ":memory:":
             Path(self.path).parent.mkdir(parents=True, exist_ok=True)
         self.lock = threading.RLock()
@@ -57,6 +60,9 @@ class Ledger:
         if self.path != ":memory:":
             self.db.execute("PRAGMA journal_mode=WAL")
         self.db.executescript(SCHEMA)
+
+    def now(self) -> datetime:
+        return self.clock()
 
     def close(self) -> None:
         self.db.close()
@@ -74,7 +80,7 @@ class Ledger:
 
     # ------------------------------------------------------------------ entries
     def append(self, kind: str, subject: str = "", **payload: Any) -> Entry:
-        at = datetime.now(UTC)
+        at = self.clock()
         body = json.dumps(payload, sort_keys=True, default=str)
         with self.transaction() as db:
             last = db.execute("SELECT hash FROM entries ORDER BY id DESC LIMIT 1").fetchone()

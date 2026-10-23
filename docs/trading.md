@@ -1,0 +1,67 @@
+# Paper Trader
+
+An automated trading loop with the safety around it built in, starting (and staying, for a long time) on a **paper**
+account. It is software for running experiments with your own signal model. It is not investment advice, and nothing here
+predicts anything: a simulation or a backtest says nothing about the future.
+
+## Try it now (no account)
+```bash
+uv sync
+uv run loamz-solutions trade demo                 # replay synthetic prices through the full engine and limits
+uv run loamz-solutions trade demo --symbols AAA,BBB,CCC --days 600
+```
+
+## Run it on a paper account
+1. Create a free **Alpaca paper** account and an API key pair (Paper Trading → API keys).
+2. Put `ALPACA_KEY_ID`, `ALPACA_SECRET_KEY` and `TRADE_SYMBOLS` in `.env`. The base URL defaults to paper.
+3. ```bash
+   uv run loamz-solutions trade status                  # account, positions, kill switch, ledger check
+   uv run loamz-solutions trade backtest                # your model over two years of daily bars, same limits
+   uv run loamz-solutions trade run-once                # one pass: signals, orders, a snapshot of equity
+   uv run loamz-solutions trade watch --every 300       # keep going (the market-hours rule keeps it quiet at night)
+   uv run loamz-solutions trade report                  # profit and loss, win rate, drawdown, from the ledger
+   uv run loamz-solutions trade explain AAPL            # why did it do that? (plain words; needs LLM_API_KEY)
+   uv run loamz-solutions trade kill                    # stop everything now; `trade resume` to continue
+   ```
+
+## Bring your own model
+A model is anything with `predict(symbol, bars) -> Signal`. The simplest way to plug in a trained model is to serve it over
+HTTP and set `SIGNAL_URL` (and `SIGNAL_TOKEN`):
+
+```
+POST SIGNAL_URL    {"symbol": "AAPL", "bars": [{"t": "...", "o": 1, "h": 2, "l": 0.5, "c": 1.5, "v": 100}, ...]}
+→ 200              {"side": "buy" | "sell" | "hold", "confidence": 0.0-1.0, "rationale": "why, in a sentence"}
+```
+
+If the model errors, times out or answers something unusable, the trader treats it as **hold**: it never guesses. Without
+`SIGNAL_URL` a moving-average crossover baseline runs, only so the machinery has something to exercise.
+
+## What stands between a signal and an order
+Every order is proposed to the guard, which asks these rules in order. Any "no" is final and written to the ledger.
+
+| Rule | Default | Meaning |
+| --- | --- | --- |
+| Kill switch | off | a file (`.state/KILL`) or `LOAMZ_SOLUTIONS_KILL` stops everything |
+| Trading hours | paper and live | no orders while the market is closed |
+| Allowlist | `TRADE_SYMBOLS` | only these symbols, ever |
+| No shorting | on | a sell may not exceed what is held |
+| Max order | 5,000 | notional per order |
+| Max position | 20% of equity | per symbol; buys are trimmed to fit, then re-checked |
+| Daily loss | 2% | after losing this much today, no new buys (sells still allowed) |
+| Orders per day | 10 | across all symbols |
+| Cooldown | 30 min | between orders on one symbol |
+| Approval | live only | a person must type `y` for every live order |
+
+Sizing: a buy commits `risk_per_trade` (1% of equity) times the model's confidence, rounded down to whole shares. Signals
+under `min_confidence` (60%) do nothing. One order per symbol, side and day is sent by construction (the order id is derived
+from them), so running twice cannot trade twice.
+
+## The ledger
+`.state/trader/ledger.sqlite` is an append-only, hash-chained record: every signal, every "no trade" with its reason, every
+proposal, denial, approval, fill and failure, and an equity snapshot after each pass. `trade verify` recomputes the chain and
+reports the first altered entry. Profit and loss, win rate and drawdown are computed from it alone.
+
+## Going live
+Not recommended, and refused by default. It needs both `ALPACA_BASE_URL=https://api.alpaca.markets` and
+`TRADE_ALLOW_LIVE=I_UNDERSTAND_THE_RISK`, and then every order waits for you at the terminal. Live trading has not been
+tested here. Run paper for months, read the ledger weekly, and keep the limits small.
