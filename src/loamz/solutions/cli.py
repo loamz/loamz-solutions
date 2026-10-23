@@ -12,6 +12,8 @@
     loamz-solutions trade status | run-once | watch --every 300 | report | explain AAPL | verify
     loamz-solutions trade kill | resume          # the kill switch
 
+    loamz-solutions serve [--demo]               # offer the above to agents on a Loamz deployment (MCP over SSE)
+
 Settings come from the environment (a `.env` file is read): MAIL_IMAP_HOST, MAIL_USER, MAIL_PASSWORD, MAIL_FOLDER,
 MAIL_VIPS (comma separated addresses or @domains), MAIL_ABOUT (a sentence about you), STATE_DIR (default .state), TRADE_*\n(see .env.example), ALPACA_KEY_ID / ALPACA_SECRET_KEY, SIGNAL_URL / SIGNAL_TOKEN (your own model), and for the
 model LLM_API_KEY / LLM_BASE_URL / LLM_MODEL. Without a model, rules alone rank your mail.
@@ -126,6 +128,35 @@ def mail(args: argparse.Namespace) -> None:
             print(f"{time.strftime('%H:%M')} fetched {report.fetched}, new {report.new}")
 
 
+def serve_tools(args: argparse.Namespace) -> None:
+    from loamz.solutions import server
+
+    token = os.environ.get("SOLUTIONS_TOKEN", "")
+    if args.print_config:
+        print(
+            server.platform_config(
+                args.url or f"http://solutions:{args.port}/sse", token or "<SOLUTIONS_TOKEN>"
+            )
+        )
+        return
+    if not token:
+        sys.exit(
+            "Set SOLUTIONS_TOKEN: agents present it as a bearer token (for example: openssl rand -hex 24)"
+        )
+    import uvicorn
+
+    service = server.from_env(demo=args.demo)
+    where = (
+        ", ".join(n for n, on in (("mail", service.mail), ("trading", service.trader)) if on)
+        or "nothing configured"
+    )
+    print(f"serving {where} on {args.host}:{args.port}/sse")
+    os.environ["PORT"] = str(args.port)
+    uvicorn.run(
+        server.build_app(service, token), host=args.host, port=args.port, log_level="warning"
+    )
+
+
 def main(argv: list[str] | None = None) -> None:
     load_env()
     parser = argparse.ArgumentParser(
@@ -156,8 +187,24 @@ def main(argv: list[str] | None = None) -> None:
     from loamz.solutions.trading import cli as trading
 
     trading.add_parser(solutions)
+    serve = solutions.add_parser(
+        "serve", help="serve the solutions as tools for agents (MCP over SSE)"
+    )
+    serve.add_argument("--host", default="0.0.0.0")
+    serve.add_argument("--port", type=int, default=8765)
+    serve.add_argument(
+        "--demo", action="store_true", help="a synthetic inbox and a simulated market"
+    )
+    serve.add_argument(
+        "--print-config",
+        action="store_true",
+        help="print the LOAMZ_AGENTS_TOOLS__SERVERS entry and exit",
+    )
+    serve.add_argument("--url", default="", help="the address agents will use, for --print-config")
     args = parser.parse_args(argv)
-    if args.solution == "mail":
+    if args.solution == "serve":
+        serve_tools(args)
+    elif args.solution == "mail":
         mail(args)
     elif args.solution == "trade":
         trading.run(args)

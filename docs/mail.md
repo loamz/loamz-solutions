@@ -45,3 +45,7 @@ uv run loamz-solutions mail watch --every 600 # sync every 10 minutes
 ## Tuning
 Add senders to `MAIL_VIPS` or `MAIL_KEEP` and re-run `sync` after clearing `.state/mail`. Rules live in
 `loamz/solutions/mail/triage.py` and each has a test in `tests/test_mail_concierge.py`; add a rule and a test together.
+
+## As tools for agents
+`loamz-solutions serve` offers the Concierge (and the Paper Trader) to agents on a Loamz deployment as MCP tools:
+`mail_digest`, `mail_top`, `mail_ask`, `mail_sync`. See [agents.md](agents.md).

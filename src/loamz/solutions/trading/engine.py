@@ -153,6 +153,51 @@ class Trader:
         )
         return SymbolResult(symbol, signal, self.status(outcome), self.detail(outcome, params))
 
+    def place_manual(
+        self, symbol: str, side: str, qty: float, note: str = "requested by a person or an agent"
+    ) -> SymbolResult:
+        """An order someone asked for, through the same guard as the model's: every limit still applies."""
+        symbol = symbol.upper()
+        if side not in ("buy", "sell") or qty <= 0:
+            return SymbolResult(
+                symbol, None, "no trade", "side must be buy or sell and qty above zero"
+            )
+        if symbol not in {x.upper() for x in self.config.risk.symbols}:
+            # Not a symbol this trader may touch: let the guard refuse (and record) it before any price is fetched.
+            blank = {
+                "side": side,
+                "qty": qty,
+                "price": 0,
+                "notional": 0,
+                "client_id": "-",
+                "why": note,
+            }
+            outcome = self.guard.run(Action("order", symbol, blank), self.send)
+            return SymbolResult(symbol, None, self.status(outcome), self.detail(outcome, blank))
+        try:
+            account = self.broker.account()
+            held = {p.symbol: p for p in self.broker.positions()}.get(symbol)
+            price = self.broker.price(symbol)
+        except BrokerError as error:
+            return SymbolResult(symbol, None, "error", str(error))
+        qty_held = held.qty if held else 0.0
+        value_after = (qty_held + (qty if side == "buy" else -qty)) * price
+        day = self.ledger.now().strftime("%Y-%m-%d")
+        params = {
+            "side": side,
+            "qty": qty,
+            "price": round(price, 4),
+            "notional": round(qty * price, 2),
+            "position_pct": round(value_after / account.equity, 4) if account.equity else 0.0,
+            "position_qty": qty_held,
+            "day_pnl_pct": round(account.day_pnl_pct, 5),
+            "confidence": 1.0,
+            "why": note,
+            "client_id": order_id(symbol, side, day),
+        }
+        outcome = self.guard.run(Action("order", symbol, params), self.send)
+        return SymbolResult(symbol, None, self.status(outcome), self.detail(outcome, params))
+
     def send(self, action: Action) -> dict[str, Any]:
         p = action.params
         order = self.broker.submit(action.subject, p["side"], p["qty"], p["client_id"])
