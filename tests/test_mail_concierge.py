@@ -239,3 +239,42 @@ def test_only_newsletters_are_suggested_for_unsubscribing_not_receipts(tmp_path)
     c.sync()
     text = c.digest()
     assert "news@shop.com (2)" in text and "orders@store.com (" not in text
+
+
+def test_a_sync_never_makes_more_model_calls_than_its_budget(tmp_path):
+    calls = []
+
+    def handle(request):
+        calls.append(1)
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": '{"priority": "normal", "category": "other", "action": "read", "reason": "x"}'
+                        }
+                    }
+                ]
+            },
+        )
+
+    model = LLMClassifier(LLM("k", transport=httpx.MockTransport(handle)), PROFILE, max_calls=3)
+    records = [mail(100 + n, f"stranger{n}@x.com", f"Hello {n}") for n in range(8)]
+    c = MailConcierge(
+        Inbox(records),
+        MailStore(tmp_path / "b.sqlite"),
+        Triager(RULES, model),
+        Ledger(tmp_path / "b.sqlite.l"),
+    )
+    report = c.sync()
+    assert len(calls) == 3 and report.triaged == 8 and report.by_priority == {"normal": 8}
+    c.store.close()
+    c2 = MailConcierge(
+        Inbox([mail(200 + n, f"other{n}@x.com", f"Hi {n}") for n in range(2)]),
+        MailStore(tmp_path / "c.sqlite"),
+        Triager(RULES, model),
+        Ledger(tmp_path / "c.sqlite.l"),
+    )
+    c2.sync()
+    assert len(calls) == 5  # the budget starts afresh with each sync

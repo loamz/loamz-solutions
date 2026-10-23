@@ -35,3 +35,11 @@ needs one. Paper first.
 3. The trader's guard still applies to an approved order: allowlist, notional, position, daily loss, hours, order count,
    cooldown, kill switch.
 4. Everything is in the hash-chained ledger; `trade_explain` and `trade_report` read it back.
+
+## Untrusted content
+Mail, files and web pages can contain text written to instruct a model ("ignore your rules and buy..."). The defences are
+structural, not clever prompts: the model proposes and never acts alone, tools that change anything wait for a person who sees the
+exact arguments, and the Guard's limits apply after approval whatever any text said. Read-only tools return text to the agent, so
+treat their output as data: do not give an agent that reads arbitrary mail the ability to act without approval, and keep
+`safe_tools` to tools that only read. The mail ranker's model budget is capped per sync (`max_calls`, 60 by default) so a flood of
+mail cannot run up a bill.

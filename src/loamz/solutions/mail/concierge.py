@@ -70,6 +70,9 @@ class MailConcierge:
     def sync(self, days: int = 2, limit: int = 200) -> SyncReport:
         since = datetime.now(UTC) - timedelta(days=days)
         report = SyncReport()
+        reset = getattr(self.triager.model, "reset", None)
+        if callable(reset):
+            reset()
         fetched = list(self.connector.fetch(since=since, limit=limit))
         report.fetched = len(fetched)
         report.new = len(self.store.add(fetched))

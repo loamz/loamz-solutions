@@ -205,10 +205,18 @@ SYSTEM = (
 
 
 class LLMClassifier:
-    def __init__(self, llm: LLM, profile: Profile | None = None) -> None:
+    def __init__(self, llm: LLM, profile: Profile | None = None, *, max_calls: int = 60) -> None:
         self.llm, self.profile = llm, profile or Profile()
+        self.max_calls, self.calls = max_calls, 0
+
+    def reset(self) -> None:
+        """Start a new sync: the model-call budget is per sync, so a flood of unusual mail cannot run up a bill."""
+        self.calls = 0
 
     def classify(self, record: Record) -> Triage | None:
+        if self.calls >= self.max_calls:
+            return None  # over budget: the rest of this sync falls back to "normal, read"
+        self.calls += 1
         about = f"About the owner: {self.profile.about}\n" if self.profile.about else ""
         prompt = (
             f"{about}From: {record.metadata.get('from_name', '')} <{record.author}>\n"

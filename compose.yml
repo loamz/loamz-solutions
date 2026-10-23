@@ -11,5 +11,28 @@ services:
       - solutions-state:/state
       - ${DATA_FOLDERS_HOST:-./data}:/data:ro
     restart: unless-stopped
+  # Everything on a schedule, telling you what matters (see docs/operations.md). Start it with: docker compose --profile run up -d
+  runner:
+    profiles: [run]
+    build: .
+    command: ["run"]
+    env_file: .env
+    volumes:
+      - solutions-state:/state
+      - ${DATA_FOLDERS_HOST:-./data}:/data:ro
+    restart: unless-stopped
+
+  dashboard:
+    profiles: [run]
+    build: .
+    command: ["dashboard", "--host", "0.0.0.0", "--port", "8780"]
+    env_file: .env
+    environment:
+      DASHBOARD_TOKEN: ${DASHBOARD_TOKEN:?set DASHBOARD_TOKEN to view the dashboard}
+    ports: ["127.0.0.1:8780:8780"]
+    volumes:
+      - solutions-state:/state
+    restart: unless-stopped
+
 volumes:
   solutions-state:
