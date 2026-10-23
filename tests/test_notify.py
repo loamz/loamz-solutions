@@ -109,3 +109,37 @@ def test_a_trade_and_a_denial_are_announced_with_what_the_model_said(tmp_path):
     trader.run_once()
     denied = [a for a in box.sent if a.title.endswith(": denied")]
     assert denied and "kill switch" in denied[0].body and denied[0].level == "warn"
+
+
+def test_resend_posts_an_email_with_the_level_in_the_subject():
+    import json
+
+    from loamz.solutions.kit.notify import Resend
+
+    seen = []
+
+    def handle(request):
+        seen.append(request)
+        return httpx.Response(200, json={"id": "e1"})
+
+    Resend("re_key", "me@example.com", transport=httpx.MockTransport(handle)).send(
+        Alert("k", "Urgent mail: contract", "Priya needs it today", "urgent")
+    )
+    body = json.loads(seen[0].content)
+    assert (
+        seen[0].headers["authorization"] == "Bearer re_key" and seen[0].url.host == "api.resend.com"
+    )
+    assert (
+        body["to"] == ["me@example.com"]
+        and body["subject"] == "[urgent] Urgent mail: contract"
+        and body["text"] == "Priya needs it today"
+    )
+
+
+def test_from_env_prefers_resend_when_its_key_and_recipient_are_set(monkeypatch):
+    for name in ("NOTIFY_WEBHOOK_URL", "SMTP_HOST"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("NOTIFY_RESEND_KEY", "re_x")
+    monkeypatch.setenv("NOTIFY_EMAIL_TO", "me@example.com")
+    notifier = from_env()
+    assert type(notifier).__name__ == "Fanout" and type(notifier.channels[0]).__name__ == "Resend"

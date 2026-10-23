@@ -91,6 +91,38 @@ class Email:
             smtp.send_message(message)
 
 
+class Resend:
+    """Email through Resend's API (no SMTP server or app password needed). `sender` must be an address Resend lets you send from:
+    `onboarding@resend.dev` works for sending to your own account's address until you verify a domain."""
+
+    URL = "https://api.resend.com/emails"
+
+    def __init__(
+        self,
+        api_key: str,
+        to: str,
+        sender: str = "Loamz <onboarding@resend.dev>",
+        *,
+        transport: httpx.BaseTransport | None = None,
+    ) -> None:
+        self.to, self.sender = to, sender
+        self.http = httpx.Client(
+            headers={"Authorization": f"Bearer {api_key}"}, timeout=20, transport=transport
+        )
+
+    def send(self, alert: Alert) -> None:
+        response = self.http.post(
+            self.URL,
+            json={
+                "from": self.sender,
+                "to": [self.to],
+                "subject": f"[{alert.level}] {alert.title}",
+                "text": alert.body or alert.title,
+            },
+        )
+        response.raise_for_status()
+
+
 class Fanout:
     def __init__(self, *channels: Notifier) -> None:
         self.channels = channels
@@ -132,7 +164,15 @@ def from_env(ledger: Ledger | None = None) -> Notifier:
     channels: list[Notifier] = []
     if os.environ.get("NOTIFY_WEBHOOK_URL"):
         channels.append(Webhook(os.environ["NOTIFY_WEBHOOK_URL"]))
-    if (
+    if os.environ.get("NOTIFY_RESEND_KEY") and os.environ.get("NOTIFY_EMAIL_TO"):
+        channels.append(
+            Resend(
+                os.environ["NOTIFY_RESEND_KEY"],
+                os.environ["NOTIFY_EMAIL_TO"],
+                os.environ.get("NOTIFY_FROM", "Loamz <onboarding@resend.dev>"),
+            )
+        )
+    elif (
         os.environ.get("NOTIFY_EMAIL_TO")
         and os.environ.get("SMTP_HOST")
         and os.environ.get("MAIL_USER")

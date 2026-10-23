@@ -23,7 +23,8 @@ Set one or more of these; with none, alerts print to the console.
 | Setting | Delivers to |
 | --- | --- |
 | `NOTIFY_WEBHOOK_URL` | Slack, Discord or ntfy (detected from the URL), or any endpoint that accepts JSON `{key, title, body, level}` |
-| `NOTIFY_EMAIL_TO` (+ `SMTP_HOST`, `MAIL_USER`, `MAIL_PASSWORD`) | an email to that address |
+| `NOTIFY_RESEND_KEY` + `NOTIFY_EMAIL_TO` (+ optional `NOTIFY_FROM`) | an email through [Resend](https://resend.com), no SMTP needed; until you verify a domain, send from `onboarding@resend.dev` to your own address |
+| `NOTIFY_EMAIL_TO` (+ `SMTP_HOST`, `MAIL_USER`, `MAIL_PASSWORD`) | an email to that address over SMTP |
 
 What triggers one: an urgent message arrives; the trader's model signals buy or sell and the order was **traded**, **denied** (with the
 rule that stopped it), **refused** or **failed**; the broker is unreachable; a job fails; the morning digest. Each event is

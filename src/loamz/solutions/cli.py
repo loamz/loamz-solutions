@@ -238,6 +238,24 @@ def dashboard(args: argparse.Namespace) -> None:
     )
 
 
+def notify_test(args: argparse.Namespace) -> None:
+    from loamz.solutions.kit.notify import Alert, from_env
+
+    notifier = from_env()
+    print(
+        f"sending a test alert through {type(notifier).__name__}"
+        + (
+            f" ({', '.join(type(ch).__name__ for ch in notifier.channels)})"
+            if hasattr(notifier, "channels")
+            else ""
+        )
+    )
+    notifier.send(
+        Alert("test", "Loamz test alert", "If you can read this, alerts reach you.", "info")
+    )
+    print("done")
+
+
 def serve_tools(args: argparse.Namespace) -> None:
     from loamz.solutions import server
 
@@ -326,6 +344,7 @@ def main(argv: list[str] | None = None) -> None:
     board.add_argument("--host", default="127.0.0.1")
     board.add_argument("--port", type=int, default=8780)
     board.add_argument("--demo", action="store_true")
+    solutions.add_parser("notify-test", help="send one test alert through the configured channels")
     run = solutions.add_parser(
         "run", help="run everything that is configured, on a schedule, and tell me what matters"
     )
@@ -347,7 +366,9 @@ def main(argv: list[str] | None = None) -> None:
     )
     serve.add_argument("--url", default="", help="the address agents will use, for --print-config")
     args = parser.parse_args(argv)
-    if args.solution == "dashboard":
+    if args.solution == "notify-test":
+        notify_test(args)
+    elif args.solution == "dashboard":
         dashboard(args)
     elif args.solution == "run":
         run_all(args)
