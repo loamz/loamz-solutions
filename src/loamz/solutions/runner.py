@@ -116,6 +116,24 @@ def jobs_for(service, notifier: Notifier, env: dict[str, str]) -> list[Job]:
                 trader.run_once()
 
         jobs.append(Job("trade", trade, every=seconds("TRADE_EVERY", 300)))
+        if env.get("WATCH_RULES"):
+            from loamz.solutions.trading.watch import Watcher, parse_rules
+
+            watcher = Watcher(
+                trader.broker,
+                parse_rules(env["WATCH_RULES"]),
+                notifier,
+                trader.ledger,
+                model=trader.model,
+                trader=trader,
+            )
+            jobs.append(
+                Job(
+                    "watch",
+                    lambda: watcher.run_once() if trader.broker.is_open() else None,
+                    every=seconds("WATCH_EVERY", 300),
+                )
+            )
     if service.data is not None:
         data = service.data
         jobs.append(Job("data-scan", data.scan, every=seconds("DATA_EVERY", 3600)))

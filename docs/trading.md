@@ -56,6 +56,24 @@ Sizing: a buy commits `risk_per_trade` (1% of equity) times the model's confiden
 under `min_confidence` (60%) do nothing. One order per symbol, side and day is sent by construction (the order id is derived
 from them), so running twice cannot trade twice.
 
+## Alerts that say "trade or not"
+A watchlist checks levels, big moves and the model's signals and tells you what each means, without trading:
+
+```bash
+uv run loamz-solutions trade watchlist --rules "AAPL>200,AAPL<170,TSLA:move=3%,MSFT:signal"
+# in .env, WATCH_RULES=… makes `loamz-solutions run` check it every WATCH_EVERY seconds (300) while the market is open
+```
+
+| Rule | Fires when |
+| --- | --- |
+| `SYM>PRICE`, `SYM<PRICE` | the last price crosses the level |
+| `SYM:move=N%` | today's move against the previous close is at least N percent, either way |
+| `SYM:signal` | the model says buy or sell with at least `TRADE_MIN_CONFIDENCE` |
+
+A signal alert is the classification you asked for: it quotes the model's reason, then answers **Would trade** (side, shares,
+size, and that every limit passes) or **No trade** with the rule that would stop it (kill switch, daily loss, position
+limit, market closed...). Alerts go where `NOTIFY_*` points (see [operations.md](operations.md)), once per rule and day.
+
 ## The ledger
 `.state/trader/ledger.sqlite` is an append-only, hash-chained record: every signal, every "no trade" with its reason, every
 proposal, denial, approval, fill and failure, and an equity snapshot after each pass. `trade verify` recomputes the chain and

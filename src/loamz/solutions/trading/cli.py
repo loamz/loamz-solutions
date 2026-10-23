@@ -128,6 +128,22 @@ def run(args: argparse.Namespace) -> None:
         print(result.summary.render())
         print(f"buy and hold  {result.benchmark_pct:+.2%} (equal weight, same window)")
         return
+    if cmd == "watchlist":
+        from loamz.solutions.kit.notify import Console
+        from loamz.solutions.trading.watch import Watcher, parse_rules
+
+        text = args.rules or os.environ.get("WATCH_RULES", "")
+        if not text:
+            sys.exit(
+                'Give rules: --rules "AAPL>200,TSLA:move=3%,MSFT:signal" or WATCH_RULES in .env'
+            )
+        trader, ledger = build(args)
+        sent = Watcher(
+            trader.broker, parse_rules(text), Console(), ledger, model=trader.model, trader=trader
+        ).run_once()
+        if not sent:
+            print("Nothing triggered.")
+        return
     if cmd == "kill":
         path = Path(risk_config(set()).kill_file)
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -189,6 +205,12 @@ def add_parser(solutions) -> None:
         sub.add_argument("--symbols", default="")
         if name == "watch":
             sub.add_argument("--every", type=int, default=300)
+    wl = commands.add_parser(
+        "watchlist",
+        help="check price levels, big moves and model signals now; says whether to trade",
+    )
+    wl.add_argument("--symbols", default="")
+    wl.add_argument("--rules", default="", help='e.g. "AAPL>200,TSLA:move=3%%,MSFT:signal"')
     commands.add_parser("report", help="profit and loss from the ledger")
     ex = commands.add_parser(
         "explain", help="why did it do that? (plain language, from the ledger)"
