@@ -20,6 +20,7 @@ from typing import Any
 
 from loamz.solutions.kit.guard import Action, Approver, Guard, Outcome, refuse
 from loamz.solutions.kit.ledger import Ledger
+from loamz.solutions.kit.notify import Alert, Notifier, Quiet
 from loamz.solutions.trading.broker import Broker, BrokerError
 from loamz.solutions.trading.models import Account, Position, Signal
 from loamz.solutions.trading.risk import RiskConfig, standard_rules
@@ -70,8 +71,10 @@ class Trader:
         config: TraderConfig,
         ledger: Ledger,
         approver: Approver = refuse,
+        notifier: Notifier | None = None,
     ) -> None:
         self.broker, self.model, self.config, self.ledger = broker, model, config, ledger
+        self.notifier = notifier or Quiet()
         self.guard = Guard(
             ledger, standard_rules(config.risk, broker, hours=broker.mode != "sim"), approver
         )
@@ -118,6 +121,14 @@ class Trader:
             held = {p.symbol: p for p in self.broker.positions()}
         except BrokerError as error:
             self.ledger.append("run.error", "broker", error=str(error))
+            self.notifier.send(
+                Alert(
+                    f"broker-error:{self.ledger.now():%Y-%m-%d-%H}",
+                    "The broker is unreachable",
+                    str(error),
+                    "urgent",
+                )
+            )
             report.results.append(SymbolResult("*", None, "error", str(error)))
             return report
         report.equity, report.day_pnl = account.equity, account.day_pnl
@@ -151,7 +162,29 @@ class Trader:
         outcome = self.guard.run(
             Action("order", symbol, {**params, "client_id": client_id}), self.send
         )
-        return SymbolResult(symbol, signal, self.status(outcome), self.detail(outcome, params))
+        result = SymbolResult(symbol, signal, self.status(outcome), self.detail(outcome, params))
+        self.announce(result, day)
+        return result
+
+    def announce(self, result: SymbolResult, day: str) -> None:
+        """Tell the owner about a signal that acted or was stopped: what the model said, and what became of it."""
+        signal = result.signal
+        if signal is None:
+            return
+        said = (
+            f"{signal.side.upper()} {result.symbol} ({signal.confidence:.0%}): {signal.rationale}"
+        )
+        level = {"traded": "info", "denied": "warn", "refused": "warn", "failed": "urgent"}.get(
+            result.status, "info"
+        )
+        self.notifier.send(
+            Alert(
+                f"trade:{result.symbol}:{signal.side}:{day}:{result.status}",
+                f"{result.symbol}: {result.status}",
+                f"{said}\n{result.detail}",
+                level,  # type: ignore[arg-type]
+            )
+        )
 
     def place_manual(
         self, symbol: str, side: str, qty: float, note: str = "requested by a person or an agent"

@@ -14,6 +14,7 @@ from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path
 
+from loamz.solutions.concierge.extract import available, extract
 from loamz.solutions.kit.records import Record
 from loamz.solutions.mail.imap import html_to_text
 
@@ -51,6 +52,7 @@ NEEDS_EXTRACTOR = {
 }
 MAX_BYTES = 1_000_000
 MAX_CHARS = 20_000
+MAX_BINARY = 25_000_000  # PDF and Office files may be larger than text before they are skipped
 
 
 def read_text(path: Path) -> str | None:
@@ -98,6 +100,7 @@ class FolderConnector:
 
     def fetch(self, since: datetime | None = None, limit: int = 5000) -> Iterator[Record]:
         count = 0
+        readable = available()
         self.unreadable = {}
         for path in self.walk():
             suffix = path.suffix.lower()
@@ -106,14 +109,19 @@ class FolderConnector:
             except OSError:
                 continue
             at = datetime.fromtimestamp(stat.st_mtime, UTC)
+            if since and at < since:
+                continue
             if suffix in NEEDS_EXTRACTOR:
-                self.unreadable[suffix] = self.unreadable.get(suffix, 0) + 1
-                continue
-            if since and at < since or stat.st_size > MAX_BYTES:
-                continue
-            text = read_text(path)
-            if text is None or not text.strip():
-                continue
+                text = extract(path) if suffix in readable and stat.st_size <= MAX_BINARY else None
+                if text is None:  # no reader installed, too big, damaged or password protected
+                    self.unreadable[suffix] = self.unreadable.get(suffix, 0) + 1
+                    continue
+            else:
+                if stat.st_size > MAX_BYTES:
+                    continue
+                text = read_text(path)
+                if text is None or not text.strip():
+                    continue
             yield Record(
                 id=f"{self.name}:{path}",
                 source=self.name,

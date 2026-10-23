@@ -16,6 +16,7 @@ from typing import Any, Protocol
 
 from loamz.solutions.kit.ledger import Ledger
 from loamz.solutions.kit.llm import LLM, LLMError
+from loamz.solutions.kit.notify import Alert, Notifier, Quiet
 from loamz.solutions.kit.records import Connector
 from loamz.solutions.mail import digest as digest_module
 from loamz.solutions.mail.store import MailStore
@@ -55,6 +56,7 @@ class MailConcierge:
         triager: Triager,
         ledger: Ledger,
         sink: Sink | None = None,
+        notifier: Notifier | None = None,
     ) -> None:
         self.connector, self.store, self.triager, self.ledger, self.sink = (
             connector,
@@ -63,6 +65,7 @@ class MailConcierge:
             ledger,
             sink,
         )
+        self.notifier = notifier or Quiet()
 
     def sync(self, days: int = 2, limit: int = 200) -> SyncReport:
         since = datetime.now(UTC) - timedelta(days=days)
@@ -84,6 +87,16 @@ class MailConcierge:
             name = result.priority.name.lower()
             report.by_priority[name] = report.by_priority.get(name, 0) + 1
             report.triaged += 1
+            if result.priority is Priority.URGENT:
+                due = f" (due: {result.deadline})" if result.deadline else ""
+                self.notifier.send(
+                    Alert(
+                        f"mail:{record.id}",
+                        f"Urgent mail: {record.title[:80]}",
+                        f"From {record.author}: {result.reason}{due}. Suggested: {result.action}.",
+                        "urgent",
+                    )
+                )
             if self.sink and result.priority >= Priority.IMPORTANT:
                 self.sink.remember(
                     {

@@ -16,12 +16,14 @@ dependencies = [
 
 [project.optional-dependencies]
 agents = ["loamz-agents"]
+# Read PDF and Office files in the Data Concierge (without these they are listed as "not readable yet")
+documents = ["pypdf>=5", "python-docx>=1.1", "openpyxl>=3.1", "python-pptx>=1.0"]
 
 [project.scripts]
 loamz-solutions = "loamz.solutions.cli:main"
 
 [dependency-groups]
-dev = ["ruff>=0.15", "pytest>=9", "pytest-asyncio>=1.4", "pytest-timeout>=2.3"]
+dev = ["ruff>=0.15", "pytest>=9", "pytest-asyncio>=1.4", "pytest-timeout>=2.3", "pypdf>=5", "python-docx>=1.1", "openpyxl>=3.1", "python-pptx>=1.0"]
 
 [build-system]
 requires = ["uv_build>=0.11.16,<0.12"]
