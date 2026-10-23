@@ -15,6 +15,10 @@
     loamz-solutions data demo                    # map + ideas on sample files and the synthetic inbox
     loamz-solutions data scan | map | search "northwind" | ask "what is the indemnity cap?" | suggest
 
+    loamz-solutions dashboard [--port 8780]      # a read-only page: mail that needs you, the trader, alerts
+
+    loamz-solutions run [--demo]                 # all of it on a schedule, alerts to NOTIFY_WEBHOOK_URL / NOTIFY_EMAIL_TO / the console
+
     loamz-solutions serve [--demo]               # offer the above to agents on a Loamz deployment (MCP over SSE)
 
 Settings come from the environment (a `.env` file is read): MAIL_IMAP_HOST, MAIL_USER, MAIL_PASSWORD, MAIL_FOLDER,
@@ -192,6 +196,48 @@ def data(args: argparse.Namespace) -> None:
         print(concierge.suggest())
 
 
+def run_all(args: argparse.Namespace) -> None:
+    from loamz.solutions import server
+    from loamz.solutions.kit.notify import from_env
+    from loamz.solutions.runner import Scheduler, jobs_for
+
+    service = server.from_env(demo=args.demo)
+    state = state_dir() / ("demo" if args.demo else "run")
+    ledger = Ledger(state / "scheduler.sqlite")
+    notifier = from_env(ledger)
+    jobs = jobs_for(service, notifier, dict(os.environ))
+    if not jobs:
+        sys.exit(
+            "Nothing is configured to run: set MAIL_*, ALPACA_* with TRADE_SYMBOLS, or DATA_FOLDERS (or use --demo)"
+        )
+    print(
+        "running: "
+        + ", ".join(j.name for j in jobs)
+        + "   (Ctrl-C to stop; `trade kill` stops trading only)"
+    )
+    Scheduler(jobs, ledger, notifier).run_forever()
+
+
+def dashboard(args: argparse.Namespace) -> None:
+    import uvicorn
+
+    from loamz.solutions import dashboard as board
+    from loamz.solutions import server
+
+    token = os.environ.get("DASHBOARD_TOKEN", "")
+    if args.host not in ("127.0.0.1", "localhost") and not token:
+        sys.exit("A dashboard on any address but localhost needs DASHBOARD_TOKEN")
+    service = server.from_env(demo=args.demo)
+    alerts = Ledger(state_dir() / ("demo" if args.demo else "run") / "scheduler.sqlite")
+    print(f"dashboard on http://{args.host}:{args.port}" + (" (token required)" if token else ""))
+    uvicorn.run(
+        board.build_app(service, token=token, alerts=alerts),
+        host=args.host,
+        port=args.port,
+        log_level="warning",
+    )
+
+
 def serve_tools(args: argparse.Namespace) -> None:
     from loamz.solutions import server
 
@@ -274,6 +320,18 @@ def main(argv: list[str] | None = None) -> None:
     d_ask = data_commands.add_parser("ask", help="ask a question across everything")
     d_ask.add_argument("question")
     data_commands.add_parser("suggest", help="useful things to do with what you have")
+    board = solutions.add_parser(
+        "dashboard", help="a read-only page: mail that needs you, the trader, alerts"
+    )
+    board.add_argument("--host", default="127.0.0.1")
+    board.add_argument("--port", type=int, default=8780)
+    board.add_argument("--demo", action="store_true")
+    run = solutions.add_parser(
+        "run", help="run everything that is configured, on a schedule, and tell me what matters"
+    )
+    run.add_argument(
+        "--demo", action="store_true", help="synthetic inbox, simulated market, sample files"
+    )
     serve = solutions.add_parser(
         "serve", help="serve the solutions as tools for agents (MCP over SSE)"
     )
@@ -289,7 +347,11 @@ def main(argv: list[str] | None = None) -> None:
     )
     serve.add_argument("--url", default="", help="the address agents will use, for --print-config")
     args = parser.parse_args(argv)
-    if args.solution == "serve":
+    if args.solution == "dashboard":
+        dashboard(args)
+    elif args.solution == "run":
+        run_all(args)
+    elif args.solution == "serve":
         serve_tools(args)
     elif args.solution == "data":
         data(args)

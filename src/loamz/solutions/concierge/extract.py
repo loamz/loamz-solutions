@@ -8,7 +8,12 @@ A missing reader is not an error: the file is counted and listed on the map as "
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
+
+logging.getLogger("pypdf").setLevel(
+    logging.ERROR
+)  # damaged PDFs are handled; do not print their warnings
 
 MAX_CHARS = 20_000
 
