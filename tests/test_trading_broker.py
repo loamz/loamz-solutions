@@ -146,3 +146,10 @@ def test_the_simulator_fills_updates_cash_and_is_idempotent():
         sim.submit("AAPL", "sell", 1, "c")
     with pytest.raises(BrokerError):
         sim.submit("AAPL", "buy", 10_000, "d")
+
+
+def test_the_endpoint_as_the_alpaca_dashboard_shows_it_is_still_paper():
+    assert AlpacaBroker("i", "s", base_url="https://paper-api.alpaca.markets/v2").mode == "paper"
+    assert AlpacaBroker("i", "s", base_url="https://paper-api.alpaca.markets/v2/").mode == "paper"
+    with pytest.raises(BrokerError):
+        AlpacaBroker("i", "s", base_url="https://api.alpaca.markets/v2")

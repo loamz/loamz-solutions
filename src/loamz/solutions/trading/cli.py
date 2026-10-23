@@ -12,7 +12,7 @@ from loamz.solutions.kit.guard import Action
 from loamz.solutions.kit.ledger import Ledger
 from loamz.solutions.kit.llm import LLM, LLMError
 from loamz.solutions.trading.backtest import backtest, load_csv, synth_bars
-from loamz.solutions.trading.broker import PAPER_URL, AlpacaBroker, Broker, SimBroker
+from loamz.solutions.trading.broker import PAPER_URL, AlpacaBroker, Broker, SimBroker, normalize
 from loamz.solutions.trading.engine import Trader, TraderConfig
 from loamz.solutions.trading.explain import explain
 from loamz.solutions.trading.pnl import summarize
@@ -71,8 +71,8 @@ def broker_from_env() -> Broker:
         sys.exit(
             "Set ALPACA_KEY_ID and ALPACA_SECRET_KEY (an Alpaca paper account), or use `trade demo` for a simulation"
         )
-    base = os.environ.get("ALPACA_BASE_URL", PAPER_URL)
-    live = base.rstrip("/") != PAPER_URL
+    base = normalize(os.environ.get("ALPACA_BASE_URL", PAPER_URL))
+    live = base != PAPER_URL
     if live and os.environ.get("TRADE_ALLOW_LIVE") != LIVE_PHRASE:
         sys.exit(
             f"A live account needs ALPACA_BASE_URL and TRADE_ALLOW_LIVE={LIVE_PHRASE}. Paper trading first."

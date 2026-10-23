@@ -34,6 +34,12 @@ class Broker(Protocol):
     def submit(self, symbol: str, side: Side, qty: float, client_id: str) -> Order: ...
 
 
+def normalize(url: str) -> str:
+    """Alpaca's dashboard shows the endpoint as https://paper-api.alpaca.markets/v2; the API paths here already include /v2."""
+    url = url.strip().rstrip("/")
+    return url.removesuffix("/v2").rstrip("/")
+
+
 def parse_time(value: str) -> datetime:
     return datetime.fromisoformat(value.replace("Z", "+00:00"))
 
@@ -50,7 +56,8 @@ class AlpacaBroker:
         feed: str = "iex",
         transport: httpx.BaseTransport | None = None,
     ) -> None:
-        live = base_url.rstrip("/") != PAPER_URL
+        base_url = normalize(base_url)
+        live = base_url != PAPER_URL
         if live and not allow_live:
             raise BrokerError("Refusing a non-paper Alpaca URL without allow_live=True")
         self.mode = "live" if live else "paper"
