@@ -241,6 +241,7 @@ class Trader:
             "price": order.filled_avg_price or p["price"],
             "status": order.status,
             "order_id": order.id,
+            "client_id": p["client_id"],
             "mode": self.broker.mode,
         }
 

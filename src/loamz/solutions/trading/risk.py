@@ -112,6 +112,23 @@ class MaxOrdersPerDay:
         return Verdict.allow()
 
 
+class AlreadySent:
+    """An order id (symbol, side, day) is sent once. A second one would be ignored by the broker while looking like a trade."""
+
+    name = "already-sent"
+
+    def check(self, action: Action, ledger: Ledger) -> Verdict:
+        client_id = action.params.get("client_id")
+        midnight = ledger.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        if client_id and any(
+            e.payload.get("client_id") == client_id for e in done_orders(ledger, midnight)
+        ):
+            return Verdict.deny(
+                f"already sent a {action.params.get('side')} for {action.subject} today"
+            )
+        return Verdict.allow()
+
+
 class Cooldown:
     name = "cooldown"
 
@@ -141,6 +158,7 @@ def standard_rules(config: RiskConfig, broker: Broker, *, hours: bool = True) ->
         MaxPositionPct(config.max_position_pct),
         MaxDailyLoss(config.max_daily_loss_pct),
         MaxOrdersPerDay(config.max_orders_per_day),
+        AlreadySent(),
         Cooldown(config.cooldown_minutes),
     ]
     if hours:

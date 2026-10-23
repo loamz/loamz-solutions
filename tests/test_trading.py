@@ -107,13 +107,16 @@ def test_the_daily_loss_limit_stops_buying_but_not_selling(tmp_path):
     assert trader.run_once().results[0].status == "traded"
 
 
-def test_one_order_per_symbol_side_and_day_and_a_cooldown(tmp_path):
+def test_one_order_per_symbol_side_and_day_and_a_cooldown_between_different_orders(tmp_path):
     trader, broker, ledger, clock = setup(tmp_path, {"AAPL": ("buy", 1.0)}, cooldown_minutes=30)
     assert trader.run_once().results[0].status == "traded"
-    again = trader.run_once().results[0]  # same moment: the cooldown refuses
-    assert again.status == "denied" and "cooldown" in again.detail
+    again = trader.run_once().results[0]  # same moment, same order
+    assert again.status == "denied" and "already sent" in again.detail
     assert order_id("AAPL", "buy", "2026-10-23") == order_id("AAPL", "buy", "2026-10-23")
     assert order_id("AAPL", "buy", "2026-10-23") != order_id("AAPL", "sell", "2026-10-23")
+    trader.model.answers["AAPL"] = ("sell", 1.0)  # a different order, but straight after the first
+    flip = trader.run_once().results[0]
+    assert flip.status == "denied" and "cooldown" in flip.detail
     assert broker.positions()[0].qty == 10
 
 
@@ -260,3 +263,14 @@ def test_a_full_backtest_runs_deterministically_and_reports(tmp_path):
         )
     )
     assert len(load_csv(str(path))) == 50
+
+
+def test_a_second_identical_order_the_same_day_is_refused_with_the_reason(tmp_path):
+    trader, broker, ledger, clock = setup(tmp_path, {"AAPL": ("buy", 1.0)}, cooldown_minutes=0)
+    assert trader.run_once().results[0].status == "traded"
+    clock[0] += timedelta(hours=2)  # past any cooldown, same day
+    again = trader.run_once().results[0]
+    assert again.status == "denied" and "already sent a buy for AAPL today" in again.detail
+    assert broker.positions()[0].qty == 10  # nothing was bought twice
+    clock[0] += timedelta(days=1)
+    assert trader.run_once().results[0].status == "traded"  # a new day, a new order

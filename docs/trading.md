@@ -49,7 +49,8 @@ Every order is proposed to the guard, which asks these rules in order. Any "no" 
 | Max position | 20% of equity | per symbol; buys are trimmed to fit, then re-checked |
 | Daily loss | 2% | after losing this much today, no new buys (sells still allowed) |
 | Orders per day | 10 | across all symbols |
-| Cooldown | 30 min | between orders on one symbol |
+| Already sent | on | one order per symbol, side and day (a repeat is refused with the reason, not silently ignored by the broker) |
+| Cooldown | 30 min | between different orders on one symbol |
 | Approval | live only | a person must type `y` for every live order |
 
 Sizing: a buy commits `risk_per_trade` (1% of equity) times the model's confidence, rounded down to whole shares. Signals
