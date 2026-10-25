@@ -7,7 +7,7 @@ changes something.
 | Solution | What it does | Try it (no credentials) |
 | --- | --- | --- |
 | **Mail Concierge** ([docs](docs/mail.md)) | Reads a mailbox read-only, ranks every message (urgent, important, normal, low, noise) with rules first and a model only for the rest, writes a daily digest, answers "what did X say about Y" | `loamz-solutions mail demo` |
-| **Paper Trader** ([docs](docs/trading.md)) | A pluggable signal model, a guard of risk rules (allowlist, size, position, daily loss, hours, cooldown, kill switch), Alpaca paper or a simulator, a hash-chained ledger with P&L, a backtester that fills at the next open | `loamz-solutions trade demo` |
+| **Paper Trader** ([docs](docs/trading.md), [research](docs/research.md)) | A pluggable signal model, a guard of risk rules (allowlist, size, position, daily loss, hours, cooldown, kill switch), Alpaca paper or a simulator, a hash-chained ledger with P&L, a backtester that fills at the next open | `loamz-solutions trade demo` |
 | **Data Concierge** ([docs](docs/data.md)) | Maps where your data lives (folders, mail, Loamz), searches across all of it, answers questions with citations, suggests what to do with it | `loamz-solutions data demo` |
 | **Run it and get told** ([docs](docs/operations.md)) | `loamz-solutions run` schedules all of it; alerts go to Slack, Discord, ntfy, a webhook or email, once per event; `loamz-solutions dashboard` shows it at a glance | `loamz-solutions run --demo` |
 | **Agent tools** ([docs](docs/agents.md)) | `loamz-solutions serve` offers all of the above to agents over MCP; reads run freely, orders wait for approval | `loamz-solutions serve --demo` |

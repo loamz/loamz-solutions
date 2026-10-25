@@ -30,6 +30,9 @@ class Panel:
         default_factory=dict
     )  # symbol -> sector; ETFs map to what they track
     etfs: set[str] = field(default_factory=set)
+    cache: dict = field(
+        default_factory=dict, repr=False, compare=False
+    )  # computed values (factors by day), shared by every strategy run on this panel
 
     @property
     def stocks(self) -> list[str]:
@@ -103,6 +106,18 @@ def volatility(series: Series, t: int, n: int = 126) -> float | None:
     mean = sum(rets) / len(rets)
     var = sum((r - mean) ** 2 for r in rets) / (len(rets) - 1)
     return math.sqrt(var) * math.sqrt(252)
+
+
+def rsi(series: Series, t: int, n: int = 14) -> float | None:
+    """Relative strength index over n days, 0 to 100: low means the recent days were mostly down (oversold)."""
+    values = window(series, t, n + 1)
+    if not values:
+        return None
+    moves = [values[i] - values[i - 1] for i in range(1, len(values))]
+    gain, loss = sum(m for m in moves if m > 0), -sum(m for m in moves if m < 0)
+    if not loss:
+        return 100.0 if gain else 50.0
+    return 100 - 100 / (1 + gain / loss)
 
 
 def atr(high: Series, low: Series, close: Series, t: int, n: int = 20) -> float | None:

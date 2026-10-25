@@ -26,6 +26,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Protocol
 
+from loamz.solutions.trading.factors import blend, explain
 from loamz.solutions.trading.panel import Panel, ret, sma, volatility
 
 LEVELS = ("strong sell", "sell", "hold", "buy", "strong buy")
@@ -45,6 +46,9 @@ class Targets:
     ratings: dict[str, Rating] = field(default_factory=dict)
     regime: str = "risk on"  # "risk on" or "risk off" (market below its 200-day average)
     note: str = ""
+    weights: dict[str, float] | None = (
+        None  # set by a baseline: exact weights, held without risk sizing, stops or trend exits
+    )
 
 
 class Strategy(Protocol):
@@ -70,9 +74,7 @@ class MomentumTrend:
         return max(self.long_lookback, 200) + 1
 
     def targets(self, panel: Panel, t: int, held: set[str]) -> Targets:
-        spy = panel.close.get(self.benchmark)
-        spy_now, spy_trend = (spy[t], sma(spy, t, 200)) if spy else (None, None)
-        risk_on = spy_now is None or spy_trend is None or spy_now > spy_trend
+        risk_on = market_risk_on(panel, t, self.benchmark)
 
         facts: dict[str, dict] = {}
         for symbol in panel.stocks:
@@ -110,15 +112,110 @@ class MomentumTrend:
                 level = "hold"
             ratings[symbol] = Rating(level, r, f["score"], describe(f, r))
 
-        kept = [s for s in ranked if s in held and rank[s] <= self.keep]
-        if risk_on:
-            new = [s for s in ranked if s not in kept][: max(0, self.top - len(kept))]
-            hold = sorted(kept + new, key=lambda s: rank[s])
-            note = ""
-        else:
-            hold = kept
-            note = "market below its 200-day average: no new positions, only held names still in an uptrend"
-        return Targets(hold, ratings, "risk on" if risk_on else "risk off", note)
+        return book(ranked, rank, held, self.top, self.keep, risk_on, ratings)
+
+
+def market_risk_on(panel: Panel, t: int, benchmark: str = "SPY") -> bool:
+    """The market (its benchmark) closed above its 200-day average; unknown counts as yes."""
+    series = panel.close.get(benchmark)
+    now, trend = (series[t], sma(series, t, 200)) if series else (None, None)
+    return now is None or trend is None or now > trend
+
+
+def in_uptrend(panel: Panel, symbol: str, t: int) -> bool:
+    """Above its 200-day average, with its 50-day average above the 200-day one."""
+    close = panel.close[symbol]
+    c, s50, s200 = close[t], sma(close, t, 50), sma(close, t, 200)
+    return None not in (c, s50, s200) and c > s200 and s50 > s200
+
+
+def book(
+    ranked: list[str],
+    rank: dict[str, int],
+    held: set[str],
+    top: int,
+    keep: int,
+    risk_on: bool,
+    ratings: dict[str, Rating],
+) -> Targets:
+    """The top names, keeping held ones while they rank within `keep`; with the market down, only those kept."""
+    kept = [s for s in ranked if s in held and rank[s] <= keep]
+    if not risk_on:
+        note = "market below its 200-day average: no new positions, only held names still in an uptrend"
+        return Targets(kept, ratings, "risk off", note)
+    new = [s for s in ranked if s not in kept][: max(0, top - len(kept))]
+    return Targets(sorted(kept + new, key=lambda s: rank[s]), ratings, "risk on")
+
+
+@dataclass
+class FactorRank:
+    """Rank the stocks in an uptrend by a blend of factors (`factors.BLEND`, or one factor alone) and hold the best, inside
+    the same frame as `MomentumTrend` (market regime, uptrend eligibility, the keep buffer), so the lab compares only what
+    each ranks by. Every rating explains itself factor by factor."""
+
+    factors: dict[str, float]
+    top: int = 8
+    keep: int = 15
+    benchmark: str = "SPY"
+    name: str = ""
+    warmup: int = 253
+
+    def __post_init__(self) -> None:
+        self.name = self.name or "factor rank: " + ", ".join(self.factors)
+
+    def targets(self, panel: Panel, t: int, held: set[str]) -> Targets:
+        scores = blend(panel, self.factors, t)
+        ranked = sorted((s for s in scores if in_uptrend(panel, s, t)), key=lambda s: -scores[s][0])
+        rank = {s: i + 1 for i, s in enumerate(ranked)}
+        ratings: dict[str, Rating] = {}
+        for symbol, (score, parts) in scores.items():
+            r = rank.get(symbol)
+            if r is None:
+                level = "sell" if symbol in held else "hold"
+            elif symbol in held and r > self.keep:
+                level = "sell"
+            elif r <= self.top:
+                level = "strong buy"
+            else:
+                level = "buy" if r <= self.keep else "hold"
+            where = f"rank {r}" if r else "not in an uptrend"
+            ratings[symbol] = Rating(
+                level, r, score, f"{explain(panel, symbol, t, parts)}; blend {score:+.2f}, {where}"
+            )
+        risk_on = market_risk_on(panel, t, self.benchmark)
+        return book(ranked, rank, held, self.top, self.keep, risk_on, ratings)
+
+
+@dataclass
+class EqualWeight:
+    """The naive baseline: every stock in the universe, equal weights, rebalanced weekly. Any strategy that picks stocks
+    from this universe has to beat simply owning all of them."""
+
+    name: str = "equal weight, every stock"
+    warmup: int = 253
+    invested: float = 0.98
+
+    def targets(self, panel: Panel, t: int, held: set[str]) -> Targets:
+        names = [s for s in panel.stocks if panel.close[s][t] is not None]
+        return Targets(
+            names, weights={s: self.invested / len(names) for s in names} if names else {}
+        )
+
+
+@dataclass
+class MarketTrend:
+    """The timing baseline: the market (SPY) while it is above its 200-day average, cash below it. Anything that adds stock
+    picking to a trend filter has to beat the trend filter alone."""
+
+    benchmark: str = "SPY"
+    name: str = "SPY above its 200-day average, else cash"
+    warmup: int = 253
+    invested: float = 0.98
+
+    def targets(self, panel: Panel, t: int, held: set[str]) -> Targets:
+        if market_risk_on(panel, t, self.benchmark):
+            return Targets([self.benchmark], weights={self.benchmark: self.invested})
+        return Targets([], regime="risk off", weights={})
 
 
 def describe(f: dict, rank: int | None) -> str:

@@ -47,6 +47,9 @@ class Position:
     entry: float
     entry_t: int
     stop: float
+    managed: bool = (
+        True  # False: a baseline's or the idle asset's, held without stops or trend exits
+    )
 
 
 @dataclass
@@ -101,8 +104,8 @@ def simulate(
 
     cash, positions = config.cash, {}
     pending: dict[
-        str, tuple[float, str, float]
-    ] = {}  # symbol -> (target qty, reason, stop distance)
+        str, tuple[float, str, float | None]
+    ] = {}  # symbol -> (target qty, reason, stop distance; None: no stop, not managed)
     last_close: dict[str, float] = {}
     peak, flat_since, prev_equity = config.cash, None, config.cash
     result = LabResult(strategy.name, config, [], [], [], [])
@@ -139,8 +142,13 @@ def simulate(
         )
 
     for t in range(start, T):
-        # 1. yesterday's decisions fill at today's open
-        for symbol, (target, reason, distance) in sorted(pending.items()):
+        # 1. yesterday's decisions fill at today's open; sales first, so their cash pays for the buys
+        def buying(item: tuple[str, tuple[float, str, float | None]]) -> tuple[bool, str]:
+            symbol, (target, _, _) = item
+            held = positions.get(symbol)
+            return (target > (held.qty if held else 0.0), symbol)
+
+        for symbol, (target, reason, distance) in sorted(pending.items(), key=buying):
             price = panel.open[symbol][t]
             if price is None:
                 continue
@@ -158,6 +166,8 @@ def simulate(
                 if held:
                     held.entry = (held.entry * held.qty + fill * qty) / (held.qty + qty)
                     held.qty += qty
+                elif distance is None:
+                    positions[symbol] = Position(qty, fill, t, 0.0, managed=False)
                 else:
                     positions[symbol] = Position(qty, fill, t, fill - distance)
             elif held and target < current:
@@ -209,9 +219,9 @@ def simulate(
             result.breaker.append((panel.dates[t], "restarted"))
 
         # 5. decisions at today's close, for tomorrow's open
-        for symbol in positions:
-            if symbol == idle:
-                continue  # the idle asset leaves only with the market regime
+        for symbol, pos in positions.items():
+            if not pos.managed:
+                continue  # the idle asset leaves only with the market regime; a baseline only by its own weights
             c, line = panel.close[symbol][t], sma(panel.close[symbol], t, config.exit_below_sma)
             if c is not None and line is not None and c < line:
                 pending[symbol] = (
@@ -222,20 +232,23 @@ def simulate(
         if not week_end[t]:
             continue
         targets = strategy.targets(panel, t, set(positions))
-        names = [s for s in targets.hold if s not in pending]
-        if day_return <= -config.daily_loss_stop:
-            names = [s for s in names if s in positions]  # a bad day: no new names
-        weights = rules.size(names, panel, t, drawdown=drawdown)
-        if targets.regime == "risk on":
-            weights = rules.park(weights, drawdown)
+        managed = targets.weights is None
+        if managed:
+            names = [s for s in targets.hold if s not in pending]
+            if day_return <= -config.daily_loss_stop:
+                names = [s for s in names if s in positions]  # a bad day: no new names
+            weights = rules.size(names, panel, t, drawdown=drawdown)
+            if targets.regime == "risk on":
+                weights = rules.park(weights, drawdown)
+        else:
+            weights = {s: w * rules.scale(drawdown) for s, w in targets.weights.items()}
         for symbol in positions:
             if symbol not in weights and symbol not in pending:
                 pending[symbol] = (0.0, "left the book", 0.0)
         for symbol, w in weights.items():
-            price, distance = panel.close[symbol][t], rules.stop_distance(panel, symbol, t)
-            if symbol == idle and price:
-                distance = price  # no stop on the idle asset: a stop of zero
-            if not price or not distance:
+            price, stopped = panel.close[symbol][t], managed and symbol != idle
+            distance = rules.stop_distance(panel, symbol, t) if stopped else None
+            if not price or (stopped and not distance):
                 continue
             target = w * equity / price
             held = positions.get(symbol)

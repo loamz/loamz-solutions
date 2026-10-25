@@ -200,7 +200,10 @@ def test_metrics_and_the_report_judge_out_of_sample_against_spy():
 def test_idle_cash_parks_in_spy_scaled_with_the_book_and_never_counts_as_a_strategy_trade():
     rules = PortfolioRules(idle_in="SPY")
     assert rules.park({"A": 0.4}) == {"A": 0.4, "SPY": pytest.approx(0.55)}
-    assert rules.park({"A": 0.4}, drawdown=0.12) == {"A": 0.4, "SPY": pytest.approx(0.075)}  # half size: 0.475 - 0.4
+    assert rules.park({"A": 0.4}, drawdown=0.12) == {
+        "A": 0.4,
+        "SPY": pytest.approx(0.075),
+    }  # half size: 0.475 - 0.4
     assert rules.park({"A": 0.95}) == {"A": 0.95}  # nothing left to park
     n = 330
     panel = make_panel({"SPY": path(n, 0.0005, wiggle=0.002), "FAST": path(n, 0.002, wiggle=0.004)})

@@ -141,6 +141,11 @@ def run(args: argparse.Namespace) -> None:
         _, warehouse = markets.build(os.environ)
         panel = warehouse.panel()
         note = f"Universe: {len(panel.stocks)} of today's most liquid large caps (survivorship bias: it flatters the past)."
+        if args.baselines:
+            from loamz.solutions.trading.baselines import ladder
+
+            print(ladder(panel, note))
+            return
         if args.experiments:
             from dataclasses import replace
 
@@ -263,6 +268,11 @@ def add_parser(solutions) -> None:
         "--experiments",
         action="store_true",
         help="compare the variants: idle cash in SPY, and without the go-to-cash breaker",
+    )
+    lab.add_argument(
+        "--baselines",
+        action="store_true",
+        help="the ladder every strategy must climb: naive baselines, each factor alone, and the blend",
     )
     commands.add_parser("report", help="profit and loss from the ledger")
     ex = commands.add_parser(
