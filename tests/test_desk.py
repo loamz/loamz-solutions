@@ -124,4 +124,10 @@ def test_the_routine_runs_the_desk_instead_of_the_per_symbol_loop(setup):
     names = [job.name for job in jobs_for(service, Quiet(), {})]
     assert "desk-evening" in names and "desk-follow-up-09:45" in names
     assert "trade" not in names
-    assert "Plan" in service.trade_plan() and "rank" in service.trade_ratings("strong buy")
+    plan, ratings = service.trade_plan(), service.trade_ratings("strong buy")
+    assert (
+        "Plan" in plan.text
+        and "Approve button" in plan.text
+        and plan.spec["root"].startswith("card")
+    )
+    assert "rank" in ratings.text and ratings.spec

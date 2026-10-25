@@ -23,10 +23,12 @@ from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, date, datetime, timedelta
 
+from loamz.solutions.kit.genui import Reply
 from loamz.solutions.kit.guard import Action, Guard, KillSwitch, RequireApproval
 from loamz.solutions.kit.ledger import Ledger
 from loamz.solutions.kit.notify import Alert, Notifier, Quiet
 from loamz.solutions.trading.broker import BrokerError
+from loamz.solutions.trading.cards import performance_card, ratings_card
 from loamz.solutions.trading.factors import BLEND
 from loamz.solutions.trading.panel import Panel, sma
 from loamz.solutions.trading.portfolio import PortfolioRules
@@ -69,41 +71,26 @@ class Plan:
     note: str = ""
 
     def render(self) -> str:
-        """A table a person can approve from: every order, its limit, stop, dollars at risk and reason."""
+        """The plan in words: what the model reads, and what a client without a screen shows."""
         lines = [
-            f"**Plan {self.id}**, from the {self.as_of} close ({self.strategy}; market {self.regime}; paper equity "
-            f"${self.equity:,.0f})."
+            f"Plan {self.id}, from the {self.as_of} close ({self.strategy}; market {self.regime}; paper equity ${self.equity:,.0f})."
         ]
         if self.note:
             lines.append(self.note)
         if not self.orders:
             lines.append("No orders: the book already matches the strategy.")
-            return "\n".join(lines)
-        lines += [
-            "",
-            "| Order | Shares | Limit | Value | Weight after | Stop | At risk | Why |",
-            "|---|---:|---:|---:|---:|---:|---:|---|",
-        ]
         for o in self.orders:
-            what = f"{o.side.upper()} {o.symbol}" + (" (risk exit)" if o.exit else "")
-            stop = f"{o.stop:,.2f}" if o.stop else "-"
-            risk = f"${o.risk:,.0f}" if o.risk else "-"
+            stop = f"; stop {o.stop:,.2f}, ${o.risk:,.0f} at risk" if o.stop and o.risk else ""
+            exit_ = " [risk exit: runs without approval]" if o.exit else ""
             lines.append(
-                f"| {what} | {o.qty:g} | {o.limit:,.2f} | ${o.notional:,.0f} | {o.weight:.0%} | {stop} | {risk} | {o.reason} |"
+                f"- {o.side.upper()} {o.qty:g} {o.symbol} limit {o.limit:,.2f} (~${o.notional:,.0f}, {o.weight:.0%} of the book "
+                f"after){stop}. {o.reason}{exit_}"
             )
         if self.kept:
-            lines += ["", "Kept as they are: " + ", ".join(self.kept)]
-        buys = [o for o in self.orders if o.side == "buy"]
-        at_risk = sum(o.risk or 0 for o in buys)
-        lines += [
-            "",
-            f"Total at risk if every new stop is hit: ${at_risk:,.0f} ({at_risk / self.equity:.1%} of the account)."
-            if self.equity
-            else "",
-            "Limits are the last close +-0.5%: a stock that gaps past its limit is not bought or sold. Sells go first; buys go "
-            "once cash covers them. Risk exits run in the evening routine even without approval.",
-            f"To send it exactly as shown: approve plan {self.id}.",
-        ]
+            lines.append("Kept as they are: " + ", ".join(self.kept))
+        lines.append(
+            "Limits are the last close +-0.5%. Sells go first; buys go once cash covers them."
+        )
         return "\n".join(lines)
 
     def to_json(self) -> str:
@@ -151,7 +138,7 @@ class Desk:
         )  # no approver: a live order is refused here by construction
 
     # ── reading ──────────────────────────────────────────────────────────────
-    def ratings(self, at_least: str = "buy", symbol: str = "") -> str:
+    def ratings(self, at_least: str = "buy", symbol: str = "") -> Reply:
         panel = self.load_panel()
         t = len(panel.dates) - 1
         held = {p.symbol for p in self.broker.positions()}
@@ -165,14 +152,18 @@ class Desk:
             ),
             key=lambda sr: (-LEVELS.index(sr[1].level), sr[1].rank or 999),
         )
-        head = f"Ratings from the {panel.dates[t]} close ({self.strategy.name}), market {targets.regime}."
+        head = f"From the {panel.dates[t]} close ({self.strategy.name}), market {targets.regime}"
         if not rows:
-            return head + (
-                f" No rating for {symbol.upper()}." if symbol else " Nothing at that level."
+            return Reply(
+                f"Ratings, {head}. "
+                + (f"No rating for {symbol.upper()}." if symbol else "Nothing at that level.")
             )
-        return "\n".join(
-            [head]
+        text = "\n".join(
+            [f"Ratings, {head}."]
             + [f"- {s}: {r.level}{' (held)' if s in held else ''}. {r.reason}" for s, r in rows]
+        )
+        return Reply.shown(
+            text, ratings_card(head, [(s, r.level, r.reason, s in held) for s, r in rows])
         )
 
     # ── planning ─────────────────────────────────────────────────────────────
@@ -471,25 +462,30 @@ class Desk:
             self.notifier.send(Alert(f"exits:{plan.id}", "Risk exits sent", sent, "warn"))
         return plan.render() + (f"\n\nSent without approval:\n{sent}" if sent else "")
 
-    def performance(self, days: int = 30) -> str:
+    def performance(self, days: int = 30) -> Reply:
         """The account against SPY over the same closes."""
         history = self.broker.equity_history(days)
         if len(history) < 2:
-            return "Not enough account history yet."
+            return Reply("Not enough account history yet.")
         panel = self.load_panel()
         spy = dict(zip(panel.dates, panel.close.get("SPY") or [], strict=False))
         first, last = history[0], history[-1]
         mine = last[1] / first[1] - 1 if first[1] else 0.0
         a, b = spy.get(first[0].date()), spy.get(last[0].date())
-        bench = f"; SPY {b / a - 1:+.2%}" if a and b else ""
+        bench = b / a - 1 if a and b else None
         peak, worst = 0.0, 0.0
         for _, eq in history:
             peak = max(peak, eq)
             worst = max(worst, 1 - eq / peak if peak else 0.0)
-        return (
-            f"{first[0].date()} to {last[0].date()}: the account {mine:+.2%} (${first[1]:,.0f} to ${last[1]:,.0f}){bench}; "
-            f"worst drop from a peak {worst:.1%}."
+        text = (
+            f"{first[0].date()} to {last[0].date()}: the account {mine:+.2%} (${first[1]:,.0f} to ${last[1]:,.0f})"
+            + (f"; SPY {bench:+.2%}" if bench is not None else "")
+            + f"; worst drop from a peak {worst:.1%}."
         )
+        card = performance_card(
+            str(first[0].date()), str(last[0].date()), mine, bench, worst, first[1], last[1]
+        )
+        return Reply.shown(text, card)
 
 
 class PanelSource:

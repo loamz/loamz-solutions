@@ -118,6 +118,7 @@ def jobs_for(service, notifier: Notifier, env: dict[str, str]) -> list[Job]:
     from loamz.solutions.markets import cli as markets
 
     if markets.configured(env):
+
         def refresh_markets() -> None:
             from loamz.solutions.markets.alpaca_data import last_settled_day
 

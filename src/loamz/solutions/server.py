@@ -20,10 +20,12 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from loamz.solutions.kit.genui import Reply
 from loamz.solutions.kit.ledger import Ledger
 from loamz.solutions.kit.llm import LLM, LLMError
 from loamz.solutions.mail import MailConcierge
 from loamz.solutions.mail.triage import Priority
+from loamz.solutions.trading.cards import account_card, plan_card
 from loamz.solutions.trading.explain import explain
 from loamz.solutions.trading.pnl import summarize
 
@@ -175,20 +177,25 @@ class Solutions:
             return concierge.suggest()
 
     # ------------------------------------------------------------------ trading
-    def trade_status(self) -> str:
+    def trade_status(self) -> Reply:
         with self.lock:
             broker = self.desk.broker if self.desk else self.need_trader().broker
             account, positions = broker.account(), broker.positions()
             ledgers = [x for x in (self.ledger, self.desk.ledger if self.desk else None) if x]
-            lines = [
-                f"mode {broker.mode}; equity {account.equity:,.2f}; cash {account.cash:,.2f}; today {account.day_pnl:+,.2f}",
-                f"kill switch {'ON' if Path(self.kill_file).exists() else 'off'}; ledger {'intact' if all(x.verify()['ok'] for x in ledgers) else 'ALTERED'}",
-            ]
-            lines += [
-                f"{p.symbol}: {p.qty:g} shares, average {p.avg_price:,.2f}, now {p.market_price:,.2f}"
-                for p in positions
-            ]
-        return "\n".join(lines)
+            killed = Path(self.kill_file).exists()
+            intact = all(x.verify()["ok"] for x in ledgers)
+        lines = [
+            f"mode {broker.mode}; equity {account.equity:,.2f}; cash {account.cash:,.2f}; today {account.day_pnl:+,.2f}",
+            f"kill switch {'ON' if killed else 'off'}; ledger {'intact' if intact else 'ALTERED'}",
+        ]
+        lines += [
+            f"{p.symbol}: {p.qty:g} shares, average {p.avg_price:,.2f}, now {p.market_price:,.2f}"
+            for p in positions
+        ]
+        card = account_card(
+            broker.mode, account.equity, account.cash, account.day_pnl, positions, killed, intact
+        )
+        return Reply.shown("\n".join(lines), card)
 
     def trade_signals(self, symbol: str) -> str:
         """What the model thinks of a symbol right now. Nothing is traded."""
@@ -222,13 +229,18 @@ class Solutions:
         with self.lock:
             return self.need_trader().run_once().render()
 
-    def trade_ratings(self, at_least: str = "buy", symbol: str = "") -> str:
+    def trade_ratings(self, at_least: str = "buy", symbol: str = "") -> Reply:
         with self.lock:
             return self.need_desk().ratings(at_least, symbol)
 
-    def trade_plan(self) -> str:
+    def trade_plan(self) -> Reply:
         with self.lock:
-            return self.need_desk().plan().render()
+            plan = self.need_desk().plan()
+        note = (
+            f"\n\nThe person is shown this plan as a card with an Approve button. Do not repeat the orders: say in one or two "
+            f"sentences what stands out (the biggest changes, the risk), then ask whether to approve plan {plan.id}."
+        )
+        return Reply(plan.render() + (note if plan.orders else ""), plan_card(plan))
 
     def trade_approve_plan(self, plan_id: str) -> str:
         with self.lock:
@@ -238,7 +250,7 @@ class Solutions:
         with self.lock:
             return self.need_desk().follow_up()
 
-    def trade_performance(self, days: int = 30) -> str:
+    def trade_performance(self, days: int = 30) -> Reply:
         with self.lock:
             return self.need_desk().performance(max(2, min(days, 365)))
 
@@ -251,21 +263,30 @@ class Solutions:
 def build_app(service: Solutions, token: str):
     """The MCP server as an ASGI app (SSE), refusing anything without the bearer token."""
     from mcp.server.fastmcp import FastMCP
+    from mcp.types import CallToolResult, TextContent
 
     mcp = FastMCP("solutions", host="0.0.0.0", port=int(os.environ.get("PORT", "8765")))
 
     def register(fn):
-        async def run(**kwargs: Any) -> str:
+        async def run(**kwargs: Any) -> CallToolResult:
             try:
-                return await asyncio.to_thread(fn, **kwargs)
+                answer = await asyncio.to_thread(fn, **kwargs)
             except Exception as error:  # noqa: BLE001 - the model gets the reason, not a stack trace
-                return f"Error: {error}"
+                answer = f"Error: {error}"
+            # The text is for the model; a spec, when there is one, is for the person's screen (json-render, kit/genui.py).
+            reply = answer if isinstance(answer, Reply) else Reply(str(answer))
+            return CallToolResult(
+                content=[TextContent(type="text", text=reply.text)],
+                structuredContent={"spec": reply.spec} if reply.spec else None,
+            )
 
         run.__name__, run.__doc__ = fn.__name__, fn.__doc__
-        run.__annotations__ = {k: v for k, v in fn.__annotations__.items()}
+        run.__annotations__ = {k: v for k, v in fn.__annotations__.items() if k != "return"} | {
+            "return": CallToolResult
+        }
         import inspect
 
-        run.__signature__ = inspect.signature(fn)  # type: ignore[attr-defined]
+        run.__signature__ = inspect.signature(fn).replace(return_annotation=CallToolResult)  # type: ignore[attr-defined]
         mcp.tool()(run)
 
     docs = {
