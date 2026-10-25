@@ -1,12 +1,22 @@
 # Run the solutions next to a Loamz cell: `docker compose up -d`, then put the printed entry into the cell's TOOL_SERVERS.
 # Secrets come from .env (see .env.example); nothing is baked into the image.
+#
+# The services join the cell's network (start the cell first), so agents reach the tools at http://solutions:8765/sse and the
+# solutions reach Loamz Data, Keycloak and storage by the names the cell gives them. LOAMZ_CELL_NETWORK names another cell's.
+x-cell: &cell
+  # Inside the cell the data API and Keycloak have these addresses; .env keeps the ones a program on this machine uses.
+  LOAMZ_ENDPOINT: ${CELL_DATA_URL:-http://data-api:8020}
+  LOAMZ_ISSUER: ${CELL_ISSUER:-http://keycloak.localhost:8081/realms/loamz}
+
 services:
   solutions:
     build: .
     env_file: .env
     environment:
+      <<: *cell
       SOLUTIONS_TOKEN: ${SOLUTIONS_TOKEN:?set SOLUTIONS_TOKEN (openssl rand -hex 24)}
     ports: ["127.0.0.1:8765:8765"]
+    networks: { default: {}, cell: { aliases: [solutions] } }
     volumes:
       - solutions-state:/state
       - ${DATA_FOLDERS_HOST:-./data}:/data:ro
@@ -17,6 +27,8 @@ services:
     build: .
     command: ["run"]
     env_file: .env
+    environment: *cell
+    networks: [default, cell]
     volumes:
       - solutions-state:/state
       - ${DATA_FOLDERS_HOST:-./data}:/data:ro
@@ -33,6 +45,11 @@ services:
     volumes:
       - solutions-state:/state
     restart: unless-stopped
+
+networks:
+  cell:
+    external: true
+    name: ${LOAMZ_CELL_NETWORK:-loamz-cell_default}
 
 volumes:
   solutions-state:

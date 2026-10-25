@@ -15,6 +15,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from loamz.solutions.kit.ledger import Ledger
 from loamz.solutions.kit.notify import Alert, Notifier
@@ -27,10 +28,17 @@ class Job:
     name: str
     run: Callable[[], object]
     every: timedelta | None = None  # an interval...
-    daily_at: tuple[int, int] | None = None  # ...or a local time of day (hour, minute)
+    daily_at: tuple[int, int] | None = None  # ...or a time of day (hour, minute)
+    tz: ZoneInfo | None = (
+        None  # the daily_at clock: this zone (a market's), or the machine's when None
+    )
     last: datetime | None = field(default=None, repr=False)
 
     def due(self, now: datetime) -> bool:
+        if self.tz is not None:
+            now = now.astimezone(self.tz)
+            if self.last is not None:
+                self.last = self.last.astimezone(self.tz)
         if self.daily_at is not None:
             target = now.replace(
                 hour=self.daily_at[0], minute=self.daily_at[1], second=0, microsecond=0
@@ -107,6 +115,26 @@ def jobs_for(service, notifier: Notifier, env: dict[str, str]) -> list[Job]:
 
         jobs.append(Job("mail-sync", lambda: mail.sync(days=2), every=seconds("MAIL_EVERY", 600)))
         jobs.append(Job("mail-digest", digest, daily_at=clock_time(env.get("DIGEST_AT", "07:30"))))
+    from loamz.solutions.markets import cli as markets
+
+    if markets.configured(env):
+        from zoneinfo import ZoneInfo
+
+        def refresh_markets() -> None:
+            from loamz.solutions.markets.alpaca_data import last_settled_day
+
+            data, warehouse = markets.build(env)
+            warehouse.update(data, today=last_settled_day(datetime.now().astimezone()))
+
+        # After the US close has settled: each evening adds the day just finished.
+        jobs.append(
+            Job(
+                "markets-update",
+                refresh_markets,
+                daily_at=clock_time(env.get("MARKETS_UPDATE_AT", "18:00")),
+                tz=ZoneInfo("America/New_York"),
+            )
+        )
     if service.trader is not None:
         trader = service.trader
         trader.notifier = notifier

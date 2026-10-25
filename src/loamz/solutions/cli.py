@@ -208,7 +208,7 @@ def run_all(args: argparse.Namespace) -> None:
     jobs = jobs_for(service, notifier, dict(os.environ))
     if not jobs:
         sys.exit(
-            "Nothing is configured to run: set MAIL_*, ALPACA_* with TRADE_SYMBOLS, or DATA_FOLDERS (or use --demo)"
+            "Nothing is configured to run: set MAIL_*, ALPACA_* with TRADE_SYMBOLS, LOAMZ_ENDPOINT for market data, or DATA_FOLDERS (or use --demo)"
         )
     print(
         "running: "
@@ -320,9 +320,11 @@ def main(argv: list[str] | None = None) -> None:
     watch.add_argument("--every", type=int, default=600)
     watch.add_argument("--days", type=int, default=2)
     watch.add_argument("--hours", type=int, default=24)
+    from loamz.solutions.markets import cli as markets
     from loamz.solutions.trading import cli as trading
 
     trading.add_parser(solutions)
+    markets.add_parser(solutions)
     data_parser = solutions.add_parser(
         "data", help="the Data Concierge: where your data lives, and questions across it"
     )
@@ -380,6 +382,8 @@ def main(argv: list[str] | None = None) -> None:
         mail(args)
     elif args.solution == "trade":
         trading.run(args)
+    elif args.solution == "markets":
+        markets.run(args)
 
 
 if __name__ == "__main__":

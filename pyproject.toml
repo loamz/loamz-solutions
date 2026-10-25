@@ -9,7 +9,7 @@ dependencies = [
     "httpx>=0.28,<1",
     "loamz-core",
     "loamz-identity",
-    "loamz-data",
+    "loamz-data[arrow]",
     "mcp>=1.30,<2",
     "uvicorn>=0.30",
 ]
