@@ -23,7 +23,7 @@ from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, date, datetime, timedelta
 
-from loamz.solutions.kit.genui import Reply
+from loamz.solutions.kit.a2ui import Reply
 from loamz.solutions.kit.guard import Action, Guard, KillSwitch, RequireApproval
 from loamz.solutions.kit.ledger import Ledger
 from loamz.solutions.kit.notify import Alert, Notifier, Quiet

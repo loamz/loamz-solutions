@@ -38,8 +38,8 @@ on the whole paper account. The default is momentum-trend with idle cash in SPY.
 | `trade_follow_up` | Records fills at their real prices, and sends buys that were waiting for the sells' cash. |
 | `trade_performance` | The account next to SPY. |
 
-In the console the plan, the account, the ratings and the performance are drawn as cards (the Paper trader's tools return a
-json-render spec beside their text, `kit/genui.py` and `trading/cards.py`): a plan card has every order with its limit, stop
+In the console the plan, the account, the ratings and the performance are drawn as cards (the Paper trader's tools return an
+A2UI surface beside their text, `kit/a2ui.py` and `trading/cards.py`): a plan card has every order with its limit, stop
 and dollars at risk, and an Approve button that sends "Approve plan <id>" to the agent. The button only talks to the agent: the
 platform's approval and the desk's own check (it refuses any plan that is not the current one) still apply.
 

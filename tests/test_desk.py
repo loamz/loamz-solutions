@@ -128,6 +128,6 @@ def test_the_routine_runs_the_desk_instead_of_the_per_symbol_loop(setup):
     assert (
         "Plan" in plan.text
         and "Approve button" in plan.text
-        and plan.spec["root"].startswith("card")
+        and plan.a2ui[0]["createSurface"]["surfaceId"].startswith("plan-")
     )
-    assert "rank" in ratings.text and ratings.spec
+    assert "rank" in ratings.text and ratings.a2ui

@@ -20,7 +20,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from loamz.solutions.kit.genui import Reply
+from loamz.solutions.kit.a2ui import Reply
 from loamz.solutions.kit.ledger import Ledger
 from loamz.solutions.kit.llm import LLM, LLMError
 from loamz.solutions.mail import MailConcierge
@@ -273,11 +273,11 @@ def build_app(service: Solutions, token: str):
                 answer = await asyncio.to_thread(fn, **kwargs)
             except Exception as error:  # noqa: BLE001 - the model gets the reason, not a stack trace
                 answer = f"Error: {error}"
-            # The text is for the model; a spec, when there is one, is for the person's screen (json-render, kit/genui.py).
+            # The text is for the model; A2UI messages, when there are any, are for the person's screen (kit/a2ui.py).
             reply = answer if isinstance(answer, Reply) else Reply(str(answer))
             return CallToolResult(
                 content=[TextContent(type="text", text=reply.text)],
-                structuredContent={"spec": reply.spec} if reply.spec else None,
+                structuredContent={"a2ui": reply.a2ui} if reply.a2ui else None,
             )
 
         run.__name__, run.__doc__ = fn.__name__, fn.__doc__
