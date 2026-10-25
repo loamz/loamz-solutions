@@ -28,6 +28,7 @@ from loamz.solutions.mail.triage import Priority
 from loamz.solutions.trading.cards import account_card, plan_card
 from loamz.solutions.trading.explain import explain
 from loamz.solutions.trading.pnl import summarize
+from loamz.solutions.web.images import ImageFinder
 
 SAFE_TOOLS = [
     "mail_sync",
@@ -39,6 +40,7 @@ SAFE_TOOLS = [
     "trade_explain",
     "trade_report",
     "trade_kill",
+    "web_images",
     "trade_ratings",
     "trade_plan",
     "trade_follow_up",
@@ -71,9 +73,11 @@ class Solutions:
         mail_max_age_minutes: int = 10,
         data=None,
         desk=None,
+        images: ImageFinder | None = None,
     ) -> None:
         self.mail, self.trader, self.ledger, self.llm = mail, trader, ledger, llm
         self.data, self.desk = data, desk
+        self.images = images or ImageFinder()
         self.kill_file = kill_file
         self.mail_max_age = timedelta(minutes=mail_max_age_minutes)
         self.lock = threading.Lock()
@@ -175,6 +179,10 @@ class Solutions:
             concierge = self.need_data()
             concierge.scan()
             return concierge.suggest()
+
+    # ------------------------------------------------------------------ web
+    def web_images(self, query: str, limit: int = 6) -> str:
+        return self.images.describe(query, limit)
 
     # ------------------------------------------------------------------ trading
     def trade_status(self) -> Reply:
@@ -311,6 +319,8 @@ def build_app(service: Solutions, token: str):
         "trade_follow_up": "Check the approved plan's orders: record fills at their real prices and send the buys that were "
         "waiting for the sells' cash. Sends nothing that was not approved.",
         "trade_performance": "The account's return and worst drop over the last `days`, next to SPY's.",
+        "web_images": "Search the web for pictures. Returns, for each, an address to put in an Image of a card or a rich answer and the "
+        "page it came from. Use for a header picture or a carousel; never invent picture addresses.",
         "trade_kill": "Stop all trading immediately (the kill switch). Always safe.",
         "trade_resume": "Turn the kill switch off so trading may continue.",
         "trade_run_once": "Run one trading pass over all symbols: the model decides and every risk limit applies.",

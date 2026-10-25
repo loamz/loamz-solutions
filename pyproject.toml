@@ -12,6 +12,7 @@ dependencies = [
     "loamz-data[arrow]",
     "mcp>=1.30,<2",
     "uvicorn>=0.30",
+    "ddgs>=9.16.1",
 ]
 
 [project.optional-dependencies]
