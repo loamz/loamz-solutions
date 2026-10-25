@@ -118,8 +118,6 @@ def jobs_for(service, notifier: Notifier, env: dict[str, str]) -> list[Job]:
     from loamz.solutions.markets import cli as markets
 
     if markets.configured(env):
-        from zoneinfo import ZoneInfo
-
         def refresh_markets() -> None:
             from loamz.solutions.markets.alpaca_data import last_settled_day
 
@@ -135,7 +133,38 @@ def jobs_for(service, notifier: Notifier, env: dict[str, str]) -> list[Job]:
                 tz=ZoneInfo("America/New_York"),
             )
         )
-    if service.trader is not None:
+    if getattr(service, "desk", None) is not None:
+        from loamz.solutions.trading.desk import rebalance_day
+
+        desk, new_york = service.desk, ZoneInfo("America/New_York")
+        desk.notifier = notifier
+
+        def evening() -> None:
+            today = datetime.now(new_york).date()
+            if today.weekday() >= 5:
+                return  # no new close on a weekend
+            with service.lock:
+                desk.evening(rebalance=rebalance_day(today))
+
+        def follow_up() -> None:
+            with service.lock:
+                desk.follow_up()
+
+        # After the day's prices are stored: risk exits go out, and on Fridays the week's plan waits for approval.
+        jobs.append(
+            Job(
+                "desk-evening",
+                evening,
+                daily_at=clock_time(env.get("DESK_EVENING_AT", "18:15")),
+                tz=new_york,
+            )
+        )
+        # After the open: fills are recorded, and buys that waited for the sells' cash are sent.
+        for at in ("09:45", "11:00"):
+            jobs.append(
+                Job(f"desk-follow-up-{at}", follow_up, daily_at=clock_time(at), tz=new_york)
+            )
+    if service.trader is not None and getattr(service, "desk", None) is None:
         trader = service.trader
         trader.notifier = notifier
 

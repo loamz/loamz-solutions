@@ -24,6 +24,37 @@ uv run loamz-solutions trade demo --symbols AAA,BBB,CCC --days 600
    uv run loamz-solutions trade kill                    # stop everything now; `trade resume` to continue
    ```
 
+## The desk: a strategy on the whole account
+
+With market data on Loamz Data ([markets.md](markets.md)), the desk runs a researched strategy ([research.md](research.md))
+on the whole paper account. The default is momentum-trend with idle cash in SPY. Chat with the Paper trader agent, or use
+`loamz-solutions serve` tools directly:
+
+| Tool | What it does |
+|---|---|
+| `trade_ratings` | Each stock's rating (strong buy to strong sell) and the factors behind it, from the last close. |
+| `trade_plan` | The orders for the next open as a table: limit, stop, dollars at risk and reason. Records the plan; sends nothing. |
+| `trade_approve_plan` | Sends that plan exactly as shown. Needs a person's approval in chat. |
+| `trade_follow_up` | Records fills at their real prices, and sends buys that were waiting for the sells' cash. |
+| `trade_performance` | The account next to SPY. |
+
+**How a plan becomes orders:**
+- Every order is a day limit order at the last close ±0.5%. A gap is never chased, and an unfilled order expires at the close.
+- Sent while the market is closed, orders wait at Alpaca for the open.
+- Sells go first. Buys go only while settled cash covers them, so the account never borrows.
+- Each new position gets a stop 2.5 ATRs below the close.
+
+**The routine** (`loamz-solutions run`, New York time):
+
+| Time | What runs |
+|---|---|
+| 18:00 | The day's prices are stored. |
+| 18:15, weekdays | Risk exits are sent without approval: a close below the stop, a close below the 100-day average, or the drawdown breaker. On Fridays, the week's plan is also proposed and emailed. |
+| 09:45 and 11:00 | Follow-up. |
+
+What to watch: Alpaca's paper dashboard shows the orders and fills. `.state/trader/desk.sqlite` keeps the plans, approvals
+and fills, hash-chained.
+
 ## Bring your own model
 A model is anything with `predict(symbol, bars) -> Signal`. The simplest way to plug in a trained model is to serve it over
 HTTP and set `SIGNAL_URL` (and `SIGNAL_TOKEN`):

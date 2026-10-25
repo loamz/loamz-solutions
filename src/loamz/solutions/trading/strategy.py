@@ -8,7 +8,8 @@
 `MomentumTrend` is trend-filtered momentum, the best-documented edge for a long-only book that trades weekly:
 - regime: the market (SPY) above its 200-day average lets the book buy; below it, it buys nothing and keeps only names still
   in their own uptrend;
-- eligible: a stock above its 200-day average whose 50-day average is above its 200-day one;
+- eligible: a stock above its 200-day average whose 50-day average is above its 200-day one, and not below its 100-day
+  average (the exit line: a name bought under it would be sold at the next close);
 - score: the average of 12-1 month and 6 month return, divided by the stock's volatility (risk-adjusted momentum);
 - the book: the top `top` eligible names; a name already held is kept while it ranks within `keep` (a buffer that cuts
   trading back and forth across the line).
@@ -86,7 +87,7 @@ class MomentumTrend:
             vol = volatility(close, t, self.vol_lookback)
             if None in (c, s50, s100, s200, m12, m6, vol) or not vol:
                 continue
-            eligible = c > s200 and s50 > s200
+            eligible = c > s200 and s50 > s200 and c >= s100  # never buy what the exit rule sells
             score = ((m12 + m6) / 2) / vol
             facts[symbol] = dict(
                 c=c, s100=s100, s200=s200, m12=m12, m6=m6, vol=vol, eligible=eligible, score=score
@@ -123,10 +124,11 @@ def market_risk_on(panel: Panel, t: int, benchmark: str = "SPY") -> bool:
 
 
 def in_uptrend(panel: Panel, symbol: str, t: int) -> bool:
-    """Above its 200-day average, with its 50-day average above the 200-day one."""
+    """Above its 200-day average, with its 50-day average above the 200-day one, and not below its 100-day average (the
+    exit line: a name bought under it would be sold at the next close)."""
     close = panel.close[symbol]
-    c, s50, s200 = close[t], sma(close, t, 50), sma(close, t, 200)
-    return None not in (c, s50, s200) and c > s200 and s50 > s200
+    c, s50, s100, s200 = close[t], sma(close, t, 50), sma(close, t, 100), sma(close, t, 200)
+    return None not in (c, s50, s100, s200) and c > s200 and s50 > s200 and c >= s100
 
 
 def book(

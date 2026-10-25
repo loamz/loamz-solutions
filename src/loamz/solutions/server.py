@@ -37,12 +37,16 @@ SAFE_TOOLS = [
     "trade_explain",
     "trade_report",
     "trade_kill",
+    "trade_ratings",
+    "trade_plan",
+    "trade_follow_up",
+    "trade_performance",
     "data_inventory",
     "data_search",
     "data_ask",
     "data_suggest",
 ]
-NEEDS_APPROVAL = ["trade_place_order", "trade_run_once", "trade_resume"]
+NEEDS_APPROVAL = ["trade_approve_plan", "trade_place_order", "trade_run_once", "trade_resume"]
 
 
 def optional_llm() -> LLM | None:
@@ -64,9 +68,10 @@ class Solutions:
         kill_file: str = ".state/KILL",
         mail_max_age_minutes: int = 10,
         data=None,
+        desk=None,
     ) -> None:
         self.mail, self.trader, self.ledger, self.llm = mail, trader, ledger, llm
-        self.data = data
+        self.data, self.desk = data, desk
         self.kill_file = kill_file
         self.mail_max_age = timedelta(minutes=mail_max_age_minutes)
         self.lock = threading.Lock()
@@ -84,6 +89,14 @@ class Solutions:
                 "The Paper Trader is not configured on this server (set ALPACA_KEY_ID, ALPACA_SECRET_KEY, TRADE_SYMBOLS)"
             )
         return self.trader
+
+    def need_desk(self):
+        if self.desk is None:
+            raise RuntimeError(
+                "The trading desk is not configured on this server (set ALPACA_KEY_ID, ALPACA_SECRET_KEY and the Loamz "
+                "Data credentials of docs/markets.md)"
+            )
+        return self.desk
 
     # ------------------------------------------------------------------ mail
     def fresh_mail(self) -> MailConcierge:
@@ -164,11 +177,12 @@ class Solutions:
     # ------------------------------------------------------------------ trading
     def trade_status(self) -> str:
         with self.lock:
-            t = self.need_trader()
-            account, positions = t.broker.account(), t.broker.positions()
+            broker = self.desk.broker if self.desk else self.need_trader().broker
+            account, positions = broker.account(), broker.positions()
+            ledgers = [x for x in (self.ledger, self.desk.ledger if self.desk else None) if x]
             lines = [
-                f"mode {t.broker.mode}; equity {account.equity:,.2f}; cash {account.cash:,.2f}; today {account.day_pnl:+,.2f}",
-                f"kill switch {'ON' if Path(self.kill_file).exists() else 'off'}; ledger {'intact' if self.ledger.verify()['ok'] else 'ALTERED'}",
+                f"mode {broker.mode}; equity {account.equity:,.2f}; cash {account.cash:,.2f}; today {account.day_pnl:+,.2f}",
+                f"kill switch {'ON' if Path(self.kill_file).exists() else 'off'}; ledger {'intact' if all(x.verify()['ok'] for x in ledgers) else 'ALTERED'}",
             ]
             lines += [
                 f"{p.symbol}: {p.qty:g} shares, average {p.avg_price:,.2f}, now {p.market_price:,.2f}"
@@ -207,6 +221,26 @@ class Solutions:
     def trade_run_once(self) -> str:
         with self.lock:
             return self.need_trader().run_once().render()
+
+    def trade_ratings(self, at_least: str = "buy", symbol: str = "") -> str:
+        with self.lock:
+            return self.need_desk().ratings(at_least, symbol)
+
+    def trade_plan(self) -> str:
+        with self.lock:
+            return self.need_desk().plan().render()
+
+    def trade_approve_plan(self, plan_id: str) -> str:
+        with self.lock:
+            return self.need_desk().approve(plan_id.strip())
+
+    def trade_follow_up(self) -> str:
+        with self.lock:
+            return self.need_desk().follow_up()
+
+    def trade_performance(self, days: int = 30) -> str:
+        with self.lock:
+            return self.need_desk().performance(max(2, min(days, 365)))
 
     def trade_place_order(self, symbol: str, side: str, qty: float) -> str:
         with self.lock:
@@ -247,6 +281,15 @@ def build_app(service: Solutions, token: str):
         "data_search": "Find things across the owner's files, mail and Loamz data by words.",
         "data_ask": "Answer a question using the owner's files, mail and Loamz data, citing what was used.",
         "data_suggest": "Useful things the owner could do with the data they have.",
+        "trade_ratings": "The strategy's rating of each stock (strong buy to strong sell) with the factors behind it, from the "
+        "last close. at_least: strong buy, buy, hold, sell or strong sell; or one symbol.",
+        "trade_plan": "Propose the rebalance for the next open: each order with its reason, limit price, stop and dollars at "
+        "risk, and its plan id. Records the plan; sends nothing.",
+        "trade_approve_plan": "Send the proposed plan with this id to the broker, exactly as shown: sells first, buys while cash "
+        "covers them. Only after the owner has seen the plan and agreed.",
+        "trade_follow_up": "Check the approved plan's orders: record fills at their real prices and send the buys that were "
+        "waiting for the sells' cash. Sends nothing that was not approved.",
+        "trade_performance": "The account's return and worst drop over the last `days`, next to SPY's.",
         "trade_kill": "Stop all trading immediately (the kill switch). Always safe.",
         "trade_resume": "Turn the kill switch off so trading may continue.",
         "trade_run_once": "Run one trading pass over all symbols: the model decides and every risk limit applies.",
@@ -307,9 +350,37 @@ def from_env(demo: bool = False) -> Solutions:
                 ledger,
                 approver=refuse,
             )
+    desk = None if demo else build_desk(os.environ)
     kill = trader.config.risk.kill_file if trader else ".state/KILL"
     concierge = None
     if demo or os.environ.get("DATA_FOLDERS"):
         concierge = cli.build_data(demo=demo)
         concierge.llm = optional_llm()
-    return Solutions(mail, trader, ledger, optional_llm(), kill_file=kill, data=concierge)
+    return Solutions(
+        mail, trader, ledger, optional_llm(), kill_file=kill, data=concierge, desk=desk
+    )
+
+
+def build_desk(env):
+    """The desk trades the strategy on the Alpaca account, reading prices from Loamz Data; off unless both are configured."""
+    from loamz.solutions.markets import cli as markets
+
+    if not markets.configured(env) or env.get("TRADE_STRATEGY", "momentum-trend") == "off":
+        return None
+    from loamz.solutions.trading import cli as trading
+    from loamz.solutions.trading.desk import STRATEGIES, Desk, PanelSource
+    from loamz.solutions.trading.portfolio import PortfolioRules
+
+    name = env.get("TRADE_STRATEGY", "momentum-trend")
+    if name not in STRATEGIES:
+        raise RuntimeError(f"TRADE_STRATEGY must be one of {', '.join(STRATEGIES)} or off")
+    idle = env.get("TRADE_IDLE", "SPY")
+    data, warehouse = markets.build(env)
+    return Desk(
+        trading.broker_from_env(),
+        PanelSource(data, warehouse),
+        Ledger(trading.state_dir() / "desk.sqlite"),
+        strategy=STRATEGIES[name](),
+        rules=PortfolioRules(idle_in=None if idle.lower() == "none" else idle.upper()),
+        kill_file=trading.risk_config(set()).kill_file,
+    )

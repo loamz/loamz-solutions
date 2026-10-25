@@ -211,3 +211,17 @@ def test_idle_cash_parks_in_spy_scaled_with_the_book_and_never_counts_as_a_strat
     plain = simulate(panel, MomentumTrend(top=1, keep=1), PortfolioRules(), LabConfig(oos_days=40))
     assert sum(parked.exposure) / len(parked.exposure) > sum(plain.exposure) / len(plain.exposure)
     assert all(t.symbol != "SPY" for t in parked.trades)
+
+
+def test_a_name_below_its_exit_line_is_never_bought():
+    n = 320
+    dip = path(300, 0.003, wiggle=0.004)
+    dip += [
+        dip[-1] * 0.99**i for i in range(1, 21)
+    ]  # still far above its 200-day average, but under its 100-day one
+    panel = make_panel(
+        {"SPY": path(n, 0.0005, wiggle=0.002), "DIP": dip, "SLOW": path(n, 0.0008, wiggle=0.004)}
+    )
+    targets = MomentumTrend(top=2, keep=2).targets(panel, n - 1, held=set())
+    assert "DIP" not in targets.hold and targets.ratings["DIP"].level == "sell"
+    assert targets.hold == ["SLOW"]

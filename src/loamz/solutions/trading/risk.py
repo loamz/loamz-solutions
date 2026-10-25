@@ -50,11 +50,12 @@ class TradingHours:
 class MaxPositionPct:
     name = "max-position"
 
-    def __init__(self, limit: float) -> None:
+    def __init__(self, limit: float, exempt: set[str] | None = None) -> None:
         self.limit = limit
+        self.exempt = exempt or set()  # e.g. the index fund idle cash is parked in
 
     def check(self, action: Action, ledger: Ledger) -> Verdict:
-        if action.params.get("side") != "buy":
+        if action.params.get("side") != "buy" or action.subject in self.exempt:
             return Verdict.allow()
         after = float(action.params.get("position_pct", 0))
         if after > self.limit:
@@ -67,11 +68,12 @@ class MaxPositionPct:
 class MaxDailyLoss:
     name = "max-daily-loss"
 
-    def __init__(self, limit: float) -> None:
+    def __init__(self, limit: float, exempt: set[str] | None = None) -> None:
         self.limit = limit
+        self.exempt = exempt or set()  # e.g. the index fund idle cash is parked in
 
     def check(self, action: Action, ledger: Ledger) -> Verdict:
-        if action.params.get("side") != "buy":
+        if action.params.get("side") != "buy" or action.subject in self.exempt:
             return Verdict.allow()  # selling reduces risk and stays possible
         loss = -float(action.params.get("day_pnl_pct", 0))
         if loss >= self.limit:

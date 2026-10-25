@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 from typing import Protocol
+from zoneinfo import ZoneInfo
 
 import httpx
 
@@ -17,6 +18,7 @@ from loamz.solutions.trading.models import Account, Bar, Order, Position, Side
 PAPER_URL = "https://paper-api.alpaca.markets"
 LIVE_URL = "https://api.alpaca.markets"
 DATA_URL = "https://data.alpaca.markets"
+NEW_YORK = ZoneInfo("America/New_York")
 
 
 class BrokerError(RuntimeError):
@@ -121,16 +123,21 @@ class AlpacaBroker:
     def is_open(self) -> bool:
         return bool(self.get(self.http, "/v2/clock")["is_open"])
 
-    def submit(self, symbol: str, side: Side, qty: float, client_id: str) -> Order:
-        """A market order, day only. `client_id` makes it idempotent: the same id never trades twice."""
+    def submit(
+        self, symbol: str, side: Side, qty: float, client_id: str, limit: float | None = None
+    ) -> Order:
+        """A day order: market, or limit at `limit`. `client_id` makes it idempotent: the same id never trades twice.
+        Sent while the market is closed, it waits at the broker for the next open."""
         body = {
             "symbol": symbol,
             "qty": str(qty),
             "side": side,
-            "type": "market",
+            "type": "market" if limit is None else "limit",
             "time_in_force": "day",
             "client_order_id": client_id,
         }
+        if limit is not None:
+            body["limit_price"] = f"{limit:.2f}"
         try:
             response = self.http.post("/v2/orders", json=body)
         except httpx.TransportError as error:
@@ -143,17 +150,34 @@ class AlpacaBroker:
             raise BrokerError(
                 f"The broker refused the order ({response.status_code}): {response.text[:200]}"
             )
-        o = response.json()
-        return Order(
-            o["id"],
-            o.get("client_order_id", client_id),
-            o["symbol"],
-            o["side"],
-            float(o["qty"]),
-            o["status"],
-            float(o.get("filled_qty") or 0),
-            float(o["filled_avg_price"]) if o.get("filled_avg_price") else None,
+        return to_order(response.json(), client_id)
+
+    def order(self, order_id: str) -> Order:
+        return to_order(self.get(self.http, f"/v2/orders/{order_id}"))
+
+    def equity_history(self, days: int = 30) -> list[tuple[datetime, float]]:
+        """The account's equity at each daily close, oldest first."""
+        body = self.get(
+            self.http, "/v2/account/portfolio/history", period=f"{max(1, days)}D", timeframe="1D"
         )
+        return [
+            (datetime.fromtimestamp(ts, NEW_YORK), float(eq))
+            for ts, eq in zip(body.get("timestamp") or [], body.get("equity") or [], strict=False)
+            if eq is not None
+        ]
+
+
+def to_order(o: dict, client_id: str = "") -> Order:
+    return Order(
+        o["id"],
+        o.get("client_order_id", client_id),
+        o["symbol"],
+        o["side"],
+        float(o["qty"]),
+        o["status"],
+        float(o.get("filled_qty") or 0),
+        float(o["filled_avg_price"]) if o.get("filled_avg_price") else None,
+    )
 
 
 class SimBroker:
@@ -204,11 +228,18 @@ class SimBroker:
     def is_open(self) -> bool:
         return self.open
 
-    def submit(self, symbol: str, side: Side, qty: float, client_id: str) -> Order:
+    def submit(
+        self, symbol: str, side: Side, qty: float, client_id: str, limit: float | None = None
+    ) -> Order:
         if client_id in self.orders:
             return self.orders[client_id]
         base = self.fills.get(symbol) or self.price(symbol)
         price = base * (1 + self.slippage if side == "buy" else 1 - self.slippage)
+        if limit is not None and (price > limit if side == "buy" else price < limit):
+            self.counter += 1
+            order = Order(f"sim-{self.counter}", client_id, symbol, side, qty, "new")
+            self.orders[client_id] = order  # a limit the price has not reached: it waits, unfilled
+            return order
         held, avg = self.holdings.get(symbol, (0.0, 0.0))
         if side == "buy":
             cost = qty * price + self.commission
@@ -226,3 +257,9 @@ class SimBroker:
         order = Order(f"sim-{self.counter}", client_id, symbol, side, qty, "filled", qty, price)
         self.orders[client_id] = order
         return order
+
+    def order(self, order_id: str) -> Order:
+        for order in self.orders.values():
+            if order.id == order_id:
+                return order
+        raise BrokerError(f"No order {order_id}")
