@@ -128,6 +128,31 @@ def run(args: argparse.Namespace) -> None:
         print(result.summary.render())
         print(f"buy and hold  {result.benchmark_pct:+.2%} (equal weight, same window)")
         return
+    if cmd == "lab":
+        from loamz.solutions.markets import cli as markets
+        from loamz.solutions.trading.lab import report, simulate, sweep
+        from loamz.solutions.trading.portfolio import PortfolioRules
+        from loamz.solutions.trading.strategy import MomentumTrend
+
+        if not markets.configured(os.environ):
+            sys.exit(
+                "The lab reads main.markets on Loamz Data: set LOAMZ_ENDPOINT and its credentials (docs/markets.md)"
+            )
+        _, warehouse = markets.build(os.environ)
+        panel = warehouse.panel()
+        note = f"Universe: {len(panel.stocks)} of today's most liquid large caps (survivorship bias: it flatters the past)."
+        print(report(simulate(panel, MomentumTrend(), PortfolioRules()), note))
+        if args.sweep:
+            print("\n### Neighbouring settings\n")
+            print(
+                sweep(
+                    panel,
+                    MomentumTrend,
+                    {"top": [5, 8, 12], "long_lookback": [189, 252]},
+                    PortfolioRules(),
+                )
+            )
+        return
     if cmd == "watchlist":
         from loamz.solutions.kit.notify import Console
         from loamz.solutions.trading.watch import Watcher, parse_rules
@@ -211,6 +236,11 @@ def add_parser(solutions) -> None:
     )
     wl.add_argument("--symbols", default="")
     wl.add_argument("--rules", default="", help='e.g. "AAPL>200,TSLA:move=3%%,MSFT:signal"')
+    lab = commands.add_parser(
+        "lab",
+        help="test the strategy on the stored market history, against SPY, in and out of sample",
+    )
+    lab.add_argument("--sweep", action="store_true", help="also try neighbouring settings")
     commands.add_parser("report", help="profit and loss from the ledger")
     ex = commands.add_parser(
         "explain", help="why did it do that? (plain language, from the ledger)"

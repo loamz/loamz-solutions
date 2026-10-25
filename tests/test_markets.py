@@ -228,5 +228,7 @@ def test_the_nightly_job_keeps_new_york_time_whatever_the_machine_clock():
     assert not job.due(datetime(2026, 10, 23, 21, 59, tzinfo=UTC))  # 17:59 in New York
     assert job.due(datetime(2026, 10, 23, 22, 1, tzinfo=UTC))  # 18:01
     job.last = datetime(2026, 10, 23, 22, 1, tzinfo=UTC)
-    assert not job.due(datetime(2026, 10, 24, 3, 0, tzinfo=UTC))  # later that New York evening: already ran
+    assert not job.due(
+        datetime(2026, 10, 24, 3, 0, tzinfo=UTC)
+    )  # later that New York evening: already ran
     assert job.due(datetime(2026, 10, 24, 22, 5, tzinfo=UTC))  # the next evening

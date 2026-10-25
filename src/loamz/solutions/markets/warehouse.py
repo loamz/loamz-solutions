@@ -62,6 +62,37 @@ class MarketWarehouse:
         )
         return [row[0] for row in result.rows]
 
+    def panel(self, start: date | None = None):
+        """Every stored bar since `start`, as a Panel, with the latest universe's sectors and which symbols are ETFs."""
+        from loamz.solutions.trading.panel import Panel
+
+        where = f" WHERE date >= DATE '{start.isoformat()}'" if start else ""
+        bars = self.client.sql.arrow(
+            f"SELECT symbol, date, open, high, low, close, volume FROM {self.name('daily_bars')}{where}",
+            max_bytes=None,
+        ).to_pylist()
+        table = self.name("universe")
+        members = self.client.sql.arrow(
+            f"SELECT DISTINCT symbol, kind, sector FROM {table} WHERE as_of = (SELECT max(as_of) FROM {table})"
+        ).to_pylist()
+        rows = (
+            (
+                b["symbol"],
+                as_date(b["date"]),
+                b["open"],
+                b["high"],
+                b["low"],
+                b["close"],
+                b["volume"],
+            )
+            for b in bars
+        )
+        return Panel.from_rows(
+            rows,
+            sectors={m["symbol"]: m["sector"] for m in members},
+            etfs={m["symbol"] for m in members if m["kind"] == "etf"},
+        )
+
     # ── writes ───────────────────────────────────────────────────────────────
     def write_bars(self, bars: Iterable[DailyBar]) -> int:
         rows = list(bars)
