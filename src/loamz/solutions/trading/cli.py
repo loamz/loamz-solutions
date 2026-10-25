@@ -141,6 +141,24 @@ def run(args: argparse.Namespace) -> None:
         _, warehouse = markets.build(os.environ)
         panel = warehouse.panel()
         note = f"Universe: {len(panel.stocks)} of today's most liquid large caps (survivorship bias: it flatters the past)."
+        if args.experiments:
+            from dataclasses import replace
+
+            from loamz.solutions.trading.lab import compare
+
+            base = PortfolioRules()
+            variants = {
+                "baseline": (MomentumTrend(), base),
+                "idle cash in SPY": (MomentumTrend(), replace(base, idle_in="SPY")),
+                "no go-to-cash breaker": (MomentumTrend(), replace(base, flat_at=1.01)),
+                "both": (MomentumTrend(), replace(base, idle_in="SPY", flat_at=1.01)),
+            }
+            table, results = compare(panel, variants)
+            print(f"### Variants, {panel.dates[0]} to {panel.dates[-1]}\n\n{note}\n\n{table}\n")
+            for name, result in results.items():
+                print(f"\n---\n### {name}\n")
+                print(report(result, note))
+            return
         print(report(simulate(panel, MomentumTrend(), PortfolioRules()), note))
         if args.sweep:
             print("\n### Neighbouring settings\n")
@@ -241,6 +259,11 @@ def add_parser(solutions) -> None:
         help="test the strategy on the stored market history, against SPY, in and out of sample",
     )
     lab.add_argument("--sweep", action="store_true", help="also try neighbouring settings")
+    lab.add_argument(
+        "--experiments",
+        action="store_true",
+        help="compare the variants: idle cash in SPY, and without the go-to-cash breaker",
+    )
     commands.add_parser("report", help="profit and loss from the ledger")
     ex = commands.add_parser(
         "explain", help="why did it do that? (plain language, from the ledger)"

@@ -152,10 +152,12 @@ class FakeClient:
                 table = next(t for t in outer.tables if t in query)
                 rows = outer.tables[table]
                 if "max(date)" in query:
+                    first: dict[str, date] = {}
                     last: dict[str, date] = {}
                     for r in rows:
+                        first[r["symbol"]] = min(first.get(r["symbol"], r["date"]), r["date"])
                         last[r["symbol"]] = max(last.get(r["symbol"], r["date"]), r["date"])
-                    return type("R", (), {"rows": [[s, d] for s, d in last.items()]})()
+                    return type("R", (), {"rows": [[s, first[s], last[s]] for s in last]})()
                 newest = max(r["as_of"] for r in rows)
                 return type(
                     "R", (), {"rows": sorted([[r["symbol"]] for r in rows if r["as_of"] == newest])}
@@ -177,14 +179,14 @@ class FakeClient:
 
 
 class FakeData:
-    def __init__(self, end: date):
-        self.end, self.asked = end, []
+    def __init__(self, end: date, n: int = 10):
+        self.end, self.n, self.asked = end, n, []
 
     def daily_bars(self, symbols, start, end=None):
         self.asked.append((tuple(sorted(symbols)), start))
         out = {}
         for s in symbols:
-            out[s] = [bar(s, d) for d in days(10, end=self.end) if d >= start]
+            out[s] = [bar(s, d) for d in days(self.n, end=self.end) if start <= d <= (end or d)]
         return out
 
 
@@ -232,3 +234,25 @@ def test_the_nightly_job_keeps_new_york_time_whatever_the_machine_clock():
         datetime(2026, 10, 24, 3, 0, tzinfo=UTC)
     )  # later that New York evening: already ran
     assert job.due(datetime(2026, 10, 24, 22, 5, tzinfo=UTC))  # the next evening
+
+
+def test_asking_for_more_years_backfills_the_older_history_once():
+    client = FakeClient()
+    warehouse = MarketWarehouse(client)
+    # the first load stored only recent days; the source has 400 days of history
+    warehouse.load(
+        FakeData(date(2026, 10, 23), n=400), [member("AAA")], years=0, today=date(2026, 10, 23)
+    )
+    recent = len(client.tables["main.markets.daily_bars"])
+    older = warehouse.load(
+        FakeData(date(2026, 10, 23), n=400), [member("AAA")], years=1, today=date(2026, 10, 23)
+    )
+    stored = client.tables["main.markets.daily_bars"]
+    assert older > 0 and len(stored) == recent + older
+    assert len({r["date"] for r in stored}) == len(stored)  # no day twice
+    assert (
+        warehouse.load(
+            FakeData(date(2026, 10, 23), n=400), [member("AAA")], years=1, today=date(2026, 10, 23)
+        )
+        == 0
+    )

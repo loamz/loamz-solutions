@@ -43,14 +43,14 @@ class MarketWarehouse:
         return True
 
     # ── reads ────────────────────────────────────────────────────────────────
-    def last_dates(self) -> dict[str, date]:
-        """The last stored day per symbol; empty before the first load."""
+    def stored(self) -> dict[str, tuple[date, date]]:
+        """The first and last stored day per symbol; empty before the first load."""
         if not self.exists("daily_bars"):
             return {}
         result = self.client.sql.rows(
-            f"SELECT symbol, max(date) AS last FROM {self.name('daily_bars')} GROUP BY symbol"
+            f"SELECT symbol, min(date) AS first, max(date) AS last FROM {self.name('daily_bars')} GROUP BY symbol"
         )
-        return {row[0]: as_date(row[1]) for row in result.rows}
+        return {row[0]: (as_date(row[1]), as_date(row[2])) for row in result.rows}
 
     def universe(self) -> list[str]:
         """The symbols of the latest universe snapshot."""
@@ -152,17 +152,27 @@ class MarketWarehouse:
         return self._fill(data, self.universe(), today - timedelta(days=365 * years + 7), today)
 
     def _fill(self, data: Bars, symbols: list[str], history_start: date, today: date) -> int:
-        last = self.last_dates()
-        by_start: dict[date, list[str]] = {}
+        """Fetch what each symbol is missing: history before its first stored day (when more years are asked for than are
+        stored), and the days after its last one."""
+        stored = self.stored()
+        windows: dict[tuple[date, date], list[str]] = {}
         for symbol in sorted(set(symbols)):  # a universe saved twice in a day lists a symbol twice
-            start = last[symbol] + timedelta(days=1) if symbol in last else history_start
-            if start <= today:
-                by_start.setdefault(start, []).append(symbol)
+            first, last = stored.get(symbol, (None, None))
+            if first is None or last is None:
+                wanted = [(history_start, today)]
+            else:
+                wanted = []
+                if history_start < first - timedelta(days=7):  # older history than is stored
+                    wanted.append((history_start, first - timedelta(days=1)))
+                if last < today:
+                    wanted.append((last + timedelta(days=1), today))
+            for window in wanted:
+                windows.setdefault(window, []).append(symbol)
         written = 0
-        for start, group in sorted(by_start.items()):
-            fetched = data.daily_bars(group, start=start, end=today)
+        for (start, end), group in sorted(windows.items()):
+            fetched = data.daily_bars(group, start=start, end=end)
             written += self.write_bars(
-                b for bars in fetched.values() for b in bars if b.date >= start
+                b for bars in fetched.values() for b in bars if start <= b.date <= end
             )
         return written
 

@@ -29,7 +29,10 @@ class PortfolioRules:
     max_sector: float = 0.35
     cash_reserve: float = 0.05
     halve_at: float = 0.10  # drawdown from the peak that halves position sizes
-    flat_at: float = 0.15  # drawdown from the peak that goes to cash
+    flat_at: float = 0.15  # drawdown from the peak that goes to cash; above 1, never
+    idle_in: str | None = (
+        None  # while the market trends up, what the picks leave uninvested sits here (e.g. "SPY")
+    )
 
     def scale(self, drawdown: float) -> float:
         if drawdown >= self.flat_at:
@@ -68,3 +71,10 @@ class PortfolioRules:
         if invested > 1 - self.cash_reserve:
             weights = {s: w * (1 - self.cash_reserve) / invested for s, w in weights.items()}
         return weights
+
+    def park(self, weights: dict[str, float], drawdown: float = 0.0) -> dict[str, float]:
+        """`weights` plus the idle asset holding what they leave uninvested (scaled down with the book, never above it)."""
+        if not self.idle_in or self.idle_in in weights:
+            return weights
+        room = (1 - self.cash_reserve) * self.scale(drawdown) - sum(weights.values())
+        return {**weights, self.idle_in: room} if room > 0.01 else weights

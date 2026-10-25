@@ -81,7 +81,9 @@ class LabResult:
     equity: list[float]
     benchmark: list[float]
     exposure: list[float]
-    trades: list[Trade] = field(default_factory=list)
+    trades: list[Trade] = field(
+        default_factory=list
+    )  # the strategy's own trades (the idle asset's are left out)
     breaker: list[tuple[date, str]] = field(default_factory=list)
     traded_value: float = 0.0
 
@@ -113,12 +115,16 @@ def simulate(
         else 0.0
     )
 
+    idle = rules.idle_in
+
     def close_trade(symbol: str, t: int, price: float, reason: str) -> None:
         nonlocal cash
         pos = positions.pop(symbol)
         fill = price * (1 - cost)
         cash += pos.qty * fill
         result.traded_value += pos.qty * fill
+        if symbol == idle:
+            return
         result.trades.append(
             Trade(
                 symbol,
@@ -204,6 +210,8 @@ def simulate(
 
         # 5. decisions at today's close, for tomorrow's open
         for symbol in positions:
+            if symbol == idle:
+                continue  # the idle asset leaves only with the market regime
             c, line = panel.close[symbol][t], sma(panel.close[symbol], t, config.exit_below_sma)
             if c is not None and line is not None and c < line:
                 pending[symbol] = (
@@ -218,11 +226,15 @@ def simulate(
         if day_return <= -config.daily_loss_stop:
             names = [s for s in names if s in positions]  # a bad day: no new names
         weights = rules.size(names, panel, t, drawdown=drawdown)
+        if targets.regime == "risk on":
+            weights = rules.park(weights, drawdown)
         for symbol in positions:
             if symbol not in weights and symbol not in pending:
                 pending[symbol] = (0.0, "left the book", 0.0)
         for symbol, w in weights.items():
             price, distance = panel.close[symbol][t], rules.stop_distance(panel, symbol, t)
+            if symbol == idle and price:
+                distance = price  # no stop on the idle asset: a stop of zero
             if not price or not distance:
                 continue
             target = w * equity / price
@@ -269,6 +281,35 @@ def sweep(
             + f" | {ins.sharpe:.2f} | {oos.sharpe:.2f} | {pct(oos.cagr)} | {pct(-oos.max_drawdown)} |"
         )
     return "\n".join(lines)
+
+
+def compare(
+    panel: Panel, variants: dict[str, tuple[Strategy, PortfolioRules]], config: LabConfig = DEFAULTS
+) -> tuple[str, dict[str, LabResult]]:
+    """Several variants on the same data: the whole period and the held-out one, each with its gate verdict."""
+    results = {
+        name: simulate(panel, strategy, rules, config)
+        for name, (strategy, rules) in variants.items()
+    }
+    lines = [
+        "| Variant | CAGR | Sharpe | Max DD | Out-of-sample CAGR | Out-of-sample Sharpe | Out-of-sample max DD | Gate |",
+        "|---|---:|---:|---:|---:|---:|---:|---|",
+    ]
+    spy_full = spy_oos = None
+    for name, result in results.items():
+        full, spy_full = segment(result, 0)
+        oos, spy_oos = segment(result, max(1, len(result.dates) - config.oos_days))
+        passed = "passed" if verdict(oos, spy_oos).startswith("**Gate passed") else "not passed"
+        lines.append(
+            f"| {name} | {pct(full.cagr)} | {full.sharpe:.2f} | {pct(-full.max_drawdown)} | {pct(oos.cagr)} | "
+            f"{oos.sharpe:.2f} | {pct(-oos.max_drawdown)} | {passed} |"
+        )
+    if spy_full and spy_oos:
+        lines.append(
+            f"| SPY, bought once | {pct(spy_full.cagr)} | {spy_full.sharpe:.2f} | {pct(-spy_full.max_drawdown)} | "
+            f"{pct(spy_oos.cagr)} | {spy_oos.sharpe:.2f} | {pct(-spy_oos.max_drawdown)} | |"
+        )
+    return "\n".join(lines), results
 
 
 # ── metrics ──────────────────────────────────────────────────────────────────
